@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Security Assessment Report — {{ target_url }}</title>
+<style>
+  :root {
+    --critical: #d32f2f; --high: #f57c00; --medium: #f9a825;
+    --low: #388e3c; --info: #1976d2;
+  }
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; color: #1a1a1a; line-height: 1.6; }
+  .cover { background: #0d1117; color: #fff; padding: 60px 80px; min-height: 200px; }
+  .cover h1 { font-size: 2.4rem; margin-bottom: 8px; }
+  .cover .subtitle { color: #8b949e; font-size: 1rem; }
+  .meta-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; padding: 40px 80px; background: #f6f8fa; border-bottom: 2px solid #e1e4e8; }
+  .meta-card { background: #fff; border-radius: 8px; padding: 20px; border: 1px solid #e1e4e8; text-align: center; }
+  .meta-card .number { font-size: 2rem; font-weight: 700; }
+  .meta-card .label { color: #6e7781; font-size: 0.85rem; margin-top: 4px; }
+  .critical-num { color: var(--critical); }
+  .high-num { color: var(--high); }
+  .medium-num { color: var(--medium); }
+  .low-num { color: var(--low); }
+  .content { padding: 40px 80px; }
+  h2 { font-size: 1.5rem; border-bottom: 2px solid #e1e4e8; padding-bottom: 8px; margin-top: 40px; }
+  h3 { font-size: 1.1rem; margin-top: 24px; }
+  .finding { border: 1px solid #e1e4e8; border-radius: 8px; margin: 20px 0; overflow: hidden; page-break-inside: avoid; }
+  .finding-header { padding: 16px 20px; display: flex; align-items: center; gap: 12px; }
+  .badge { padding: 4px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; color: #fff; }
+  .badge-critical { background: var(--critical); }
+  .badge-high { background: var(--high); }
+  .badge-medium { background: var(--medium); color: #000; }
+  .badge-low { background: var(--low); }
+  .badge-info { background: var(--info); }
+  .finding-title { font-weight: 600; font-size: 1rem; }
+  .finding-body { padding: 20px; background: #fff; border-top: 1px solid #e1e4e8; }
+  .meta-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; font-size: 0.875rem; }
+  .meta-item label { color: #6e7781; display: block; font-size: 0.78rem; text-transform: uppercase; margin-bottom: 2px; }
+  pre { background: #0d1117; color: #e6edf3; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; line-height: 1.5; }
+  .recommendation { background: #f0fdf4; border-left: 4px solid var(--low); padding: 12px 16px; border-radius: 0 6px 6px 0; margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  th { background: #f6f8fa; text-align: left; padding: 10px 12px; border-bottom: 2px solid #e1e4e8; }
+  td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+  .footer { text-align: center; padding: 40px; color: #8b949e; font-size: 0.8rem; border-top: 1px solid #e1e4e8; margin-top: 60px; }
+  @media print { .cover { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>Security Assessment Report</h1>
+  <div class="subtitle">{{ target_url }}</div>
+  <div class="subtitle" style="margin-top: 12px;">Generated: {{ generated_at }} &nbsp;|&nbsp; Risk Score: {{ risk_score }}/10 ({{ risk_level }})</div>
+</div>
+
+<div class="meta-grid">
+  <div class="meta-card">
+    <div class="number critical-num">{{ severity_counts.critical }}</div>
+    <div class="label">Critical</div>
+  </div>
+  <div class="meta-card">
+    <div class="number high-num">{{ severity_counts.high }}</div>
+    <div class="label">High</div>
+  </div>
+  <div class="meta-card">
+    <div class="number medium-num">{{ severity_counts.medium }}</div>
+    <div class="label">Medium</div>
+  </div>
+  <div class="meta-card">
+    <div class="number low-num">{{ severity_counts.low }}</div>
+    <div class="label">Low / Info</div>
+  </div>
+</div>
+
+<div class="content">
+  <h2>Executive Summary</h2>
+  <p>{{ executive_summary }}</p>
+
+  <h2>Findings ({{ findings_count }} total)</h2>
+  {% for finding in findings %}
+  <div class="finding">
+    <div class="finding-header" style="background:{% if finding.severity.value == 'critical' %}#fff0f0{% elif finding.severity.value == 'high' %}#fff8f0{% elif finding.severity.value == 'medium' %}#fffdf0{% else %}#f0f9f0{% endif %}">
+      <span class="badge badge-{{ finding.severity.value }}">{{ finding.severity.value }}</span>
+      <span class="finding-title">{{ loop.index }}. {{ finding.title }}</span>
+    </div>
+    <div class="finding-body">
+      <div class="meta-row">
+        <div class="meta-item">
+          <label>Type</label>{{ finding.vulnerability_type.value | replace('_', ' ') | title }}
+        </div>
+        <div class="meta-item">
+          <label>CVSS Score</label>{{ finding.cvss_score or 'N/A' }}
+        </div>
+        <div class="meta-item">
+          <label>CWE</label>{% if finding.cwe_id %}CWE-{{ finding.cwe_id }}{% else %}N/A{% endif %}
+        </div>
+        {% if finding.owasp_category %}
+        <div class="meta-item">
+          <label>OWASP</label>{{ finding.owasp_category }}
+        </div>
+        {% endif %}
+        {% if finding.affected_url %}
+        <div class="meta-item" style="grid-column: span 2">
+          <label>Affected URL</label><code style="word-break:break-all">{{ finding.affected_url }}</code>
+        </div>
+        {% endif %}
+      </div>
+
+      <p>{{ finding.description }}</p>
+
+      {% if finding.evidence and finding.evidence.code_snippet %}
+      <pre>{{ finding.evidence.code_snippet }}</pre>
+      {% endif %}
+
+      <div class="recommendation">
+        <strong>Recommendation:</strong> {{ finding.recommendation }}
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <p style="color: #388e3c; font-weight: 600;">✓ No vulnerabilities found.</p>
+  {% endfor %}
+
+  {% if owasp_mapping %}
+  <h2>OWASP Top 10 Mapping</h2>
+  <table>
+    <tr><th>OWASP Category</th><th>Findings</th><th>Max Severity</th></tr>
+    {% for cat, cat_findings in owasp_mapping.items() %}
+    <tr>
+      <td>{{ cat }}</td>
+      <td>{{ cat_findings | length }}</td>
+      <td>{{ cat_findings | map(attribute='severity') | map('string') | first | upper }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+
+<div class="footer">
+  Generated by SSS Platform &bull; Smart Security Scanner &bull; {{ generated_at }}
+</div>
+</body>
+</html>
