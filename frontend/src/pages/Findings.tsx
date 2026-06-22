@@ -83,6 +83,35 @@ function FindingCard({ finding }: { finding: any }) {
             </div>
           )}
 
+          {finding.code_snippet && !finding.evidence?.code_snippet && (
+            <div>
+              <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Code Snippet</h4>
+              <pre className="bg-gray-950 p-3 rounded-lg text-xs text-green-300 overflow-x-auto whitespace-pre-wrap">
+                {finding.code_snippet}
+              </pre>
+            </div>
+          )}
+
+          {finding.poc && Object.keys(finding.poc).length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">PoC</h4>
+              <pre className="bg-gray-950 p-3 rounded-lg text-xs text-blue-300 overflow-x-auto whitespace-pre-wrap">
+                {JSON.stringify(finding.poc, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {finding.reproduction_steps?.length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Reproduction Steps</h4>
+              <ol className="list-decimal list-inside space-y-1 text-sm text-gray-300">
+                {finding.reproduction_steps.map((step: string, idx: number) => (
+                  <li key={idx}>{step}</li>
+                ))}
+              </ol>
+            </div>
+          )}
+
           {finding.recommendation && (
             <div className="bg-emerald-900/20 border border-emerald-800 rounded-lg p-3">
               <h4 className="text-xs font-semibold text-emerald-400 uppercase mb-1">Recommendation</h4>

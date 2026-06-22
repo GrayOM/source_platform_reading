@@ -75,12 +75,25 @@ def validate_public_http_url(url: str) -> None:
     if not hostname:
         raise ValueError("Invalid URL: no hostname")
 
-    if hostname.lower() in ("localhost", "localhost."):
+    host = hostname.lower().rstrip(".")
+    if _is_private_target_allowed(host):
+        return
+
+    if host in ("localhost", "localhost."):
         raise ValueError("SSRF blocked: localhost")
 
     try:
         ip = ipaddress.ip_address(socket.gethostbyname(hostname))
+        if settings.allow_private_targets and settings.environment in ("development", "e2e", "test"):
+            return
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
             raise ValueError(f"SSRF blocked: {ip} is not a public address")
     except socket.gaierror:
         pass  # DNS failure is OK at validation time
+
+
+def _is_private_target_allowed(hostname: str) -> bool:
+    """Allow explicit test hosts only in non-production environments."""
+    if settings.environment not in ("development", "e2e", "test"):
+        return False
+    return hostname in settings.ssrf_allowed_hosts_list

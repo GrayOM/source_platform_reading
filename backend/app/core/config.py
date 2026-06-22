@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     crawl_concurrency: int = 5
     crawl_timeout_seconds: int = 30
     allow_external_resources: bool = False
+    allow_private_targets: bool = False
+    ssrf_allowed_hosts: str = ""
 
     # AI
     anthropic_api_key: str = ""
@@ -48,6 +50,10 @@ class Settings(BaseSettings):
     @property
     def allowed_origins_list(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",")]
+
+    @property
+    def ssrf_allowed_hosts_list(self) -> list[str]:
+        return [h.strip().lower() for h in self.ssrf_allowed_hosts.split(",") if h.strip()]
 
     @property
     def max_resource_size_bytes(self) -> int:

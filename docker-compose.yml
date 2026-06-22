@@ -39,6 +39,7 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change_me_at_least_32_random_chars_for_dev}
       FERNET_KEY: ${FERNET_KEY:-YlVYalI0YW9QY2tOalR4OTBNeURuMERvcElLd29OWlE=}
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      SSRF_ALLOWED_HOSTS: ${SSRF_ALLOWED_HOSTS:-vulnerable-site,host.docker.internal}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost,http://localhost:3000}
     volumes:
       - scan_data:/data/scans
@@ -64,6 +65,7 @@ services:
       FERNET_KEY: ${FERNET_KEY:-YlVYalI0YW9QY2tOalR4OTBNeURuMERvcElLd29OWlE=}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       RUN_MIGRATIONS: "false"
+      SSRF_ALLOWED_HOSTS: ${SSRF_ALLOWED_HOSTS:-vulnerable-site,host.docker.internal}
     volumes:
       - scan_data:/data/scans
     depends_on:
@@ -87,6 +89,7 @@ services:
       FERNET_KEY: ${FERNET_KEY:-YlVYalI0YW9QY2tOalR4OTBNeURuMERvcElLd29OWlE=}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       RUN_MIGRATIONS: "false"
+      SSRF_ALLOWED_HOSTS: ${SSRF_ALLOWED_HOSTS:-vulnerable-site,host.docker.internal}
     volumes:
       - scan_data:/data/scans
     shm_size: 2gb

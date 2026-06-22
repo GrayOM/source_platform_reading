@@ -25,8 +25,10 @@ export function Reports() {
   const { data: reports = [], isLoading } = useQuery({
     queryKey: ["reports", scanId],
     queryFn: () => getScanReports(scanId!),
-    refetchInterval: (data: any) =>
-      (data ?? []).some((r: any) => !r.file_path) ? 3000 : false,
+    refetchInterval: (query) => {
+      const data = query.state.data as any[] | undefined;
+      return (data ?? []).some((r: any) => !r.file_path) ? 3000 : false;
+    },
   });
 
   const generateMutation = useMutation({

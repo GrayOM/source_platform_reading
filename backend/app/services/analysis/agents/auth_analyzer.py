@@ -70,14 +70,14 @@ Analyze for:
     def _extract_auth_snippets(self, resources: list[dict]) -> str:
         import re
         AUTH_PATTERNS = [
-            r"(?i)(localStorage|sessionStorage)\.(set|get)Item\(['\"](?:token|auth|jwt|session|user)",
-            r"(?i)Authorization\s*[:=]\s*['\"]?(Bearer|Basic)",
-            r"(?i)jwt\.(verify|decode|sign)",
-            r"(?i)(login|logout|register|auth|authenticate|token|session)",
-            r"(?i)role\s*[=!]=",
-            r"(?i)isAdmin|isAuthenticated|hasPermission|checkAuth",
+            r"(localStorage|sessionStorage)\.(set|get)Item\(['\"](?:token|auth|jwt|session|user)",
+            r"Authorization\s*[:=]\s*['\"]?(Bearer|Basic)",
+            r"jwt\.(verify|decode|sign)",
+            r"(login|logout|register|auth|authenticate|token|session)",
+            r"role\s*[=!]=",
+            r"isAdmin|isAuthenticated|hasPermission|checkAuth",
         ]
-        combined = re.compile("|".join(AUTH_PATTERNS))
+        combined = re.compile("|".join(AUTH_PATTERNS), re.IGNORECASE)
         snippets = []
         for r in resources:
             if r.get("resource_type") not in ("js", "html"):

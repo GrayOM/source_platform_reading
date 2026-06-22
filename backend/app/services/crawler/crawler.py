@@ -206,25 +206,26 @@ class PlaywrightCrawler:
                     if not self._is_in_scope(final_url):
                         await page.close()
                         return
-                    self.discovered_resources[final_url] = DiscoveredResource(
-                        url=final_url,
-                        resource_type=ResourceType.HTML,
-                        http_status=status,
-                        discovered_on_page=parent,
-                        metadata={"page": True, "requested_url": url},
-                    )
+                    content_type = response.headers.get("content-type", "").split(";")[0].lower()
+                    if content_type in ("", "text/html", "application/xhtml+xml"):
+                        self.discovered_resources[final_url] = DiscoveredResource(
+                            url=final_url,
+                            resource_type=ResourceType.HTML,
+                            http_status=status,
+                            discovered_on_page=parent,
+                            metadata={"page": True, "requested_url": url},
+                        )
 
                 if self.screenshot:
                     screenshot_path = self.output_dir / "screenshots" / f"{_url_to_filename(url)}.png"
                     await page.screenshot(path=str(screenshot_path), full_page=True)
 
-                # Extract all links from page
+                # Extract navigable page links only. Scripts/styles are captured
+                # by the request route and must not be re-queued as pages.
                 links = await page.evaluate("""
                     () => {
                         const links = new Set();
                         document.querySelectorAll('a[href]').forEach(a => links.add(a.href));
-                        document.querySelectorAll('link[href]').forEach(l => links.add(l.href));
-                        document.querySelectorAll('script[src]').forEach(s => links.add(s.src));
                         document.querySelectorAll('form[action]').forEach(f => links.add(f.action));
                         return Array.from(links).filter(l => l.startsWith('http'));
                     }

@@ -1,6 +1,7 @@
 """Unit tests for security utilities."""
 import pytest
 from app.core.security import (
+    settings,
     hash_password,
     verify_password,
     create_access_token,
@@ -50,3 +51,17 @@ def test_ssrf_validation_allows_public():
     except ValueError as e:
         if "SSRF" in str(e):
             pytest.fail(f"SSRF check incorrectly blocked example.com: {e}")
+
+
+def test_ssrf_validation_allows_explicit_dev_host(monkeypatch):
+    monkeypatch.setattr(settings, "environment", "development")
+    monkeypatch.setattr(settings, "ssrf_allowed_hosts", "vulnerable-site,host.docker.internal")
+    validate_target_url("http://vulnerable-site/")
+
+
+def test_ssrf_validation_blocks_allowlist_host_in_production(monkeypatch):
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "ssrf_allowed_hosts", "vulnerable-site")
+    monkeypatch.setattr("socket.gethostbyname", lambda _: "172.20.0.10")
+    with pytest.raises(ValueError, match="SSRF"):
+        validate_target_url("http://vulnerable-site/")
