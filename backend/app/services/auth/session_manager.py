@@ -28,13 +28,18 @@ async def apply_session_to_context(session: ScanSession, context: BrowserContext
         raw = decrypt_session_data(session.storage_encrypted)
         storage: dict = json.loads(raw.decode("utf-8"))
         local_storage = storage.get("local_storage", {})
-        if local_storage:
+        session_storage = storage.get("session_storage", {})
+        if local_storage or session_storage:
             # Inject via init script — runs on every page before any JS
             await context.add_init_script(f"""
                 (function() {{
-                    const data = {json.dumps(local_storage)};
-                    for (const [k, v] of Object.entries(data)) {{
+                    const localData = {json.dumps(local_storage)};
+                    const sessionData = {json.dumps(session_storage)};
+                    for (const [k, v] of Object.entries(localData)) {{
                         localStorage.setItem(k, v);
+                    }}
+                    for (const [k, v] of Object.entries(sessionData)) {{
+                        sessionStorage.setItem(k, v);
                     }}
                 }})();
             """)

@@ -13,6 +13,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.core.config import get_settings
 from app.models.finding import Finding, Severity
+from app.models.resource import ResourceType
 from app.models.report import ReportFormat, ReportType
 from app.models.scan import Scan
 
@@ -57,6 +58,14 @@ class ReportEngine:
             counts[f.severity.value] += 1
 
         risk_score = self._calculate_risk_score()
+        resources = list(getattr(self.scan, "resources", []) or [])
+        pages = [r for r in resources if r.resource_type == ResourceType.HTML or (r.extra_metadata or {}).get("page")]
+        js_files = [r for r in resources if r.resource_type == ResourceType.JS]
+        api_candidates = [
+            f.affected_url for f in sorted_findings
+            if f.title.lower().startswith("api endpoint") and f.affected_url
+        ]
+        source_maps = [r for r in resources if r.resource_type == ResourceType.SOURCE_MAP or r.url.endswith(".map")]
 
         return {
             "scan": self.scan,
@@ -67,6 +76,11 @@ class ReportEngine:
             "findings": sorted_findings,
             "findings_count": len(self.findings),
             "severity_counts": counts,
+            "pages": pages,
+            "resources": resources,
+            "js_files": js_files,
+            "api_candidates": api_candidates,
+            "source_maps": source_maps,
             "risk_score": risk_score,
             "risk_level": self._risk_level(risk_score),
             "owasp_mapping": self._build_owasp_mapping(),
@@ -146,6 +160,14 @@ class ReportEngine:
             "risk_level": ctx["risk_level"],
             "severity_counts": ctx["severity_counts"],
             "executive_summary": ctx["executive_summary"],
+            "collection": {
+                "page_count": len(ctx["pages"]),
+                "resource_count": len(ctx["resources"]),
+                "pages": [r.url for r in ctx["pages"]],
+                "js_files": [r.url for r in ctx["js_files"]],
+                "api_candidates": ctx["api_candidates"],
+                "source_maps": [r.url for r in ctx["source_maps"]],
+            },
             "findings": [
                 {
                     "id": str(f.id),
@@ -160,6 +182,9 @@ class ReportEngine:
                     "owasp_category": f.owasp_category,
                     "recommendation": f.recommendation,
                     "evidence": f.evidence,
+                    "code_snippet": f.code_snippet,
+                    "poc": f.poc,
+                    "reproduction_steps": f.reproduction_steps,
                 }
                 for f in ctx["findings"]
             ],
@@ -175,6 +200,9 @@ class ReportEngine:
             f"**Target:** {ctx['target_url']}  ",
             f"**Generated:** {ctx['generated_at']}  ",
             f"**Risk Score:** {ctx['risk_score']}/10 ({ctx['risk_level']})  ",
+            f"**Auth Method:** {getattr(getattr(ctx['scan'], 'session', None), 'auth_method', 'none')}  ",
+            f"**Collected Pages:** {len(ctx['pages'])}  ",
+            f"**Collected Resources:** {len(ctx['resources'])}  ",
             f"",
             f"## Executive Summary",
             f"",
@@ -189,6 +217,27 @@ class ReportEngine:
             if count > 0:
                 lines.append(f"| {sev.upper()} | {count} |")
 
+        lines += [
+            "",
+            "## Collection Results",
+            "",
+            "### Pages",
+            "",
+            *[f"- {r.url} ({r.http_status or 'n/a'})" for r in ctx["pages"][:100]],
+            "",
+            "### JavaScript Files",
+            "",
+            *[f"- {r.url}" for r in ctx["js_files"][:100]],
+            "",
+            "### API Endpoint Candidates",
+            "",
+            *[f"- {url}" for url in ctx["api_candidates"][:100]],
+            "",
+            "### Source Maps",
+            "",
+            *[f"- {r.url}" for r in ctx["source_maps"][:100]],
+        ]
+
         lines += ["", "## Findings", ""]
         for i, f in enumerate(ctx["findings"], 1):
             lines += [
@@ -200,6 +249,21 @@ class ReportEngine:
                 f"**CWE:** {f.cwe_id or 'N/A'}  ",
                 f"",
                 f.description,
+                f"",
+                f"**Evidence:**",
+                f"",
+                "```",
+                f.code_snippet or str(f.evidence)[:1000],
+                "```",
+                f"",
+                f"**PoC:**",
+                f"",
+                "```json",
+                json.dumps(f.poc or {}, indent=2, ensure_ascii=False, default=str),
+                "```",
+                f"",
+                f"**Reproduction Steps:**",
+                *[f"{idx}. {step}" for idx, step in enumerate(f.reproduction_steps or [], 1)],
                 f"",
                 f"**Recommendation:** {f.recommendation}",
                 f"",
@@ -226,6 +290,6 @@ class ReportEngine:
             import weasyprint
             weasyprint.HTML(filename=str(html_path)).write_pdf(str(pdf_path))
         except Exception as exc:
-            log.error("report.pdf_failed", error=str(exc))
-            raise
+            log.error("report.pdf_failed_falling_back_to_html", error=str(exc), html_path=str(html_path))
+            return html_path
         return pdf_path

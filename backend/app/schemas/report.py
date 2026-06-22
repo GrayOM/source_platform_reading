@@ -16,6 +16,7 @@ class ReportOut(BaseModel):
     scan_id: uuid.UUID
     format: ReportFormat
     report_type: ReportType
+    file_path: str | None
     file_size: int
     created_at: datetime
 

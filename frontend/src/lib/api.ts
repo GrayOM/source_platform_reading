@@ -66,5 +66,17 @@ export const getScanReports = (scan_id: string) =>
   api.get(`/reports/scans/${scan_id}`).then((r) => r.data);
 export const generateReport = (scan_id: string, format: string, report_type: string) =>
   api.post(`/reports/scans/${scan_id}/generate`, { format, report_type }).then((r) => r.data);
-export const getReportDownloadUrl = (report_id: string) =>
-  `${BASE}/reports/${report_id}/download?token=${localStorage.getItem("access_token")}`;
+export const downloadReport = async (report_id: string) => {
+  const response = await api.get(`/reports/${report_id}/download`, { responseType: "blob" });
+  const disposition = response.headers["content-disposition"] ?? "";
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  const filename = match?.[1] ?? `sss-report-${report_id}`;
+  const url = URL.createObjectURL(response.data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};

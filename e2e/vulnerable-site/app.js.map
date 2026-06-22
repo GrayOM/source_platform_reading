@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "file": "app.js",
+  "sources": ["app.source.js"],
+  "sourcesContent": [
+    "localStorage.setItem('access_token', 'e2e-local-storage-token');\nconst output = document.getElementById('dom-xss-output');\nif (output && location.hash.length > 1) output.innerHTML = decodeURIComponent(location.hash.slice(1));\nwindow.addEventListener('message', event => document.body.insertAdjacentHTML('beforeend', event.data.html));\nfetch('/api/profile?include=roles');\nfetch('/api/orders/42', { headers: { Authorization: 'Bearer e2e-hardcoded-test-token' } });\n"
+  ],
+  "names": [],
+  "mappings": ""
+}

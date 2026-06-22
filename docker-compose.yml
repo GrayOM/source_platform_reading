@@ -1,14 +1,14 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:15-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-sss}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_strong_password}
       POSTGRES_DB: ${POSTGRES_DB:-sss_platform}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sss}"]
       interval: 5s
@@ -32,11 +32,14 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sss}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sss_platform}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sss}:${POSTGRES_PASSWORD:-change_me_strong_password}@postgres:5432/${POSTGRES_DB:-sss_platform}
       REDIS_URL: redis://redis:6379/0
       SCAN_DATA_PATH: /data/scans
+      SECRET_KEY: ${SECRET_KEY:-change_me_at_least_32_random_chars_for_dev}
+      FERNET_KEY: ${FERNET_KEY:-YlVYalI0YW9QY2tOalR4OTBNeURuMERvcElLd29OWlE=}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost,http://localhost:3000}
     volumes:
       - scan_data:/data/scans
     ports:
@@ -53,11 +56,14 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     command: celery -A app.core.celery_app worker -Q default,analysis,reports -c 4 --loglevel=info
-    env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sss}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sss_platform}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sss}:${POSTGRES_PASSWORD:-change_me_strong_password}@postgres:5432/${POSTGRES_DB:-sss_platform}
       REDIS_URL: redis://redis:6379/0
       SCAN_DATA_PATH: /data/scans
+      SECRET_KEY: ${SECRET_KEY:-change_me_at_least_32_random_chars_for_dev}
+      FERNET_KEY: ${FERNET_KEY:-YlVYalI0YW9QY2tOalR4OTBNeURuMERvcElLd29OWlE=}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      RUN_MIGRATIONS: "false"
     volumes:
       - scan_data:/data/scans
     depends_on:
@@ -72,12 +78,15 @@ services:
       context: ./backend
       dockerfile: Dockerfile.browser
     command: celery -A app.core.celery_app worker -Q crawl,auth -c 1 --loglevel=info
-    env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sss}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sss_platform}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sss}:${POSTGRES_PASSWORD:-change_me_strong_password}@postgres:5432/${POSTGRES_DB:-sss_platform}
       REDIS_URL: redis://redis:6379/0
       SCAN_DATA_PATH: /data/scans
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      SECRET_KEY: ${SECRET_KEY:-change_me_at_least_32_random_chars_for_dev}
+      FERNET_KEY: ${FERNET_KEY:-YlVYalI0YW9QY2tOalR4OTBNeURuMERvcElLd29OWlE=}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      RUN_MIGRATIONS: "false"
     volumes:
       - scan_data:/data/scans
     shm_size: 2gb
@@ -101,10 +110,18 @@ services:
       - "443:443"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./infra/nginx/certs:/etc/nginx/certs:ro
     depends_on:
       - backend
       - frontend
+    restart: unless-stopped
+
+  vulnerable-site:
+    image: nginx:alpine
+    profiles: ["e2e"]
+    ports:
+      - "8081:80"
+    volumes:
+      - ./e2e/vulnerable-site:/usr/share/nginx/html:ro
     restart: unless-stopped
 
 volumes:

@@ -15,6 +15,7 @@ import structlog
 from playwright.async_api import Browser, BrowserContext, Page, Route, async_playwright
 
 from app.core.config import get_settings
+from app.core.security import validate_public_http_url
 from app.models.scan import ScanSession
 from app.models.resource import ResourceType
 from app.services.auth.session_manager import apply_session_to_context
@@ -32,6 +33,7 @@ class CrawlResult:
     sitemap: dict = field(default_factory=dict)
     endpoint_candidates: list[str] = field(default_factory=list)
     websocket_urls: list[str] = field(default_factory=list)
+    failed_urls: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -74,6 +76,7 @@ class PlaywrightCrawler:
         self.max_pages = config.get("max_pages", settings.max_crawl_pages)
         self.concurrency = config.get("concurrency", settings.crawl_concurrency)
         self.follow_subdomains = config.get("follow_subdomains", False)
+        self.allow_external_resources = config.get("allow_external_resources", settings.allow_external_resources)
         self.excluded_paths: list[str] = config.get("excluded_paths", [])
         self.screenshot = config.get("screenshot_pages", True)
 
@@ -82,6 +85,7 @@ class PlaywrightCrawler:
         self.discovered_resources: dict[str, DiscoveredResource] = {}
         self.endpoint_candidates: set[str] = set()
         self.ws_urls: set[str] = set()
+        self.failed_urls: list[dict] = []
         self.sitemap_builder = SitemapBuilder()
         self.semaphore: asyncio.Semaphore | None = None
 
@@ -93,6 +97,15 @@ class PlaywrightCrawler:
             base = ".".join(self.base_domain.split(".")[-2:])
             return parsed.netloc.endswith(base)
         return parsed.netloc == self.base_domain
+
+    def _can_download_resource(self, url: str) -> bool:
+        if not self.allow_external_resources and not self._is_in_scope(url):
+            return False
+        try:
+            validate_public_http_url(url)
+        except ValueError:
+            return False
+        return True
 
     def _is_excluded(self, url: str) -> bool:
         path = urllib.parse.urlparse(url).path
@@ -140,6 +153,7 @@ class PlaywrightCrawler:
             sitemap=self.sitemap_builder.to_dict(),
             endpoint_candidates=list(self.endpoint_candidates),
             websocket_urls=list(self.ws_urls),
+            failed_urls=self.failed_urls,
         )
 
     async def _crawl_page(self, context: BrowserContext, url: str, depth: int, parent: str | None) -> None:
@@ -171,7 +185,7 @@ class PlaywrightCrawler:
                         self.ws_urls.add(req_url)
                     elif resource_type in ("script", "stylesheet", "image", "font", "document"):
                         rtype = classify_url(req_url)
-                        if rtype and req_url not in self.discovered_resources:
+                        if rtype and self._can_download_resource(req_url) and req_url not in self.discovered_resources:
                             discovered_on_this_page.append(req_url)
                             self.discovered_resources[req_url] = DiscoveredResource(
                                 url=req_url,
@@ -183,9 +197,22 @@ class PlaywrightCrawler:
 
                 await page.route("**/*", handle_request)
 
+                validate_public_http_url(url)
                 response = await page.goto(url, wait_until="networkidle", timeout=settings.crawl_timeout_seconds * 1000)
                 if response:
                     status = response.status
+                    final_url = response.url
+                    validate_public_http_url(final_url)
+                    if not self._is_in_scope(final_url):
+                        await page.close()
+                        return
+                    self.discovered_resources[final_url] = DiscoveredResource(
+                        url=final_url,
+                        resource_type=ResourceType.HTML,
+                        http_status=status,
+                        discovered_on_page=parent,
+                        metadata={"page": True, "requested_url": url},
+                    )
 
                 if self.screenshot:
                     screenshot_path = self.output_dir / "screenshots" / f"{_url_to_filename(url)}.png"
@@ -204,7 +231,7 @@ class PlaywrightCrawler:
                 """)
 
                 # Extract JS-defined routes and API calls
-                js_urls = await page.evaluate("""
+                js_urls = await page.evaluate(r"""
                     () => {
                         const text = Array.from(document.querySelectorAll('script:not([src])'))
                             .map(s => s.textContent).join(' ');
@@ -244,14 +271,25 @@ class PlaywrightCrawler:
 
             except Exception as exc:
                 log.warning("crawl.page_failed", url=url, error=str(exc))
+                self.failed_urls.append({"url": url, "error": str(exc)})
+                self.discovered_resources[url] = DiscoveredResource(
+                    url=url,
+                    resource_type=ResourceType.OTHER,
+                    discovered_on_page=parent,
+                    metadata={"failed": True, "error": str(exc)},
+                )
 
     async def _download_resource(self, url: str, discovered_on: str) -> None:
         if url in self.discovered_resources and self.discovered_resources[url].file_path:
             return  # already downloaded
+        if not self._can_download_resource(url):
+            return
 
         try:
             async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=30) as client:
                 resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+                if not self._can_download_resource(str(resp.url)):
+                    return
                 if resp.status_code >= 400:
                     return
 
@@ -260,7 +298,8 @@ class PlaywrightCrawler:
                     return
 
                 mime = resp.headers.get("content-type", "").split(";")[0].strip()
-                rtype = classify_mime(mime) or classify_url(url)
+                rtype = classify_url(url) if url.endswith(".map") else None
+                rtype = rtype or classify_mime(mime) or classify_url(url)
                 if not rtype:
                     return
 

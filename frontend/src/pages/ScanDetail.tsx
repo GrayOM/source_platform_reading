@@ -24,7 +24,8 @@ export function ScanDetail() {
   const { data: scan, isLoading } = useQuery({
     queryKey: ["scan", scanId],
     queryFn: () => getScan(scanId!),
-    refetchInterval: (data) => {
+    refetchInterval: (query) => {
+      const data = query.state.data as any;
       const active = ["pending", "crawling", "analyzing", "authenticating", "reporting"];
       return data && active.includes(data.status) ? 3000 : false;
     },

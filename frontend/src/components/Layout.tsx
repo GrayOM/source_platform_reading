@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, FolderOpen, Search, AlertTriangle, FileText, LogOut, Shield } from "lucide-react";
+import { LayoutDashboard, FolderOpen, LogOut, Shield } from "lucide-react";
 import clsx from "clsx";
 
 const nav = [

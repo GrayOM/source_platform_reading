@@ -18,7 +18,8 @@ export function useScanProgress(scanId: string | undefined, enabled: boolean = t
     if (!scanId || !enabled) return;
 
     const token = localStorage.getItem("access_token");
-    const wsBase = import.meta.env.VITE_WS_URL ?? `ws://${window.location.host}`;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsBase = import.meta.env.VITE_WS_URL ?? `${protocol}//${window.location.host}`;
     const url = `${wsBase}/ws/scans/${scanId}?token=${token}`;
 
     const ws = new WebSocket(url);

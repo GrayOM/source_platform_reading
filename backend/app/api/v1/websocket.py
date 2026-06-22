@@ -6,9 +6,13 @@ import uuid
 import redis.asyncio as aioredis
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from jose import JWTError
+from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.core.database import AsyncSessionLocal
 from app.core.security import decode_token
+from app.models.project import Project
+from app.models.scan import Scan
 
 router = APIRouter(tags=["websocket"])
 settings = get_settings()
@@ -21,10 +25,21 @@ async def scan_progress_ws(websocket: WebSocket, scan_id: uuid.UUID) -> None:
         await websocket.close(code=4001)
         return
     try:
-        decode_token(token)
-    except JWTError:
+        claims = decode_token(token)
+        if claims.get("type") != "access":
+            raise JWTError("not an access token")
+        user_id = uuid.UUID(claims["sub"])
+    except (JWTError, KeyError, ValueError):
         await websocket.close(code=4001)
         return
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Scan.id).join(Project).where(Scan.id == scan_id, Project.user_id == user_id)
+        )
+        if result.scalar_one_or_none() is None:
+            await websocket.close(code=4003)
+            return
 
     await websocket.accept()
     r = aioredis.from_url(settings.redis_url)

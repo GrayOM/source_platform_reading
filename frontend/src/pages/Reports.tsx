@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileText, Download, Loader2, Plus } from "lucide-react";
 import toast from "react-hot-toast";
-import { getScanReports, generateReport, getReportDownloadUrl } from "../lib/api";
+import { getScanReports, generateReport, downloadReport } from "../lib/api";
 import { formatDistanceToNow } from "date-fns";
 
 const FORMATS = ["pdf", "html", "json", "markdown"] as const;
@@ -36,6 +36,11 @@ export function Reports() {
       qc.invalidateQueries({ queryKey: ["reports", scanId] });
     },
     onError: (err: any) => toast.error(err.response?.data?.detail ?? "Failed"),
+  });
+
+  const downloadMutation = useMutation({
+    mutationFn: (reportId: string) => downloadReport(reportId),
+    onError: (err: any) => toast.error(err.response?.data?.detail ?? "Download failed"),
   });
 
   return (
@@ -112,14 +117,12 @@ export function Reports() {
                 </div>
               </div>
               {r.file_path ? (
-                <a
-                  href={getReportDownloadUrl(r.id)}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  onClick={() => downloadMutation.mutate(r.id)}
                   className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 font-medium"
                 >
                   <Download className="w-3.5 h-3.5" /> Download
-                </a>
+                </button>
               ) : (
                 <span className="flex items-center gap-1.5 text-xs text-gray-500">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...

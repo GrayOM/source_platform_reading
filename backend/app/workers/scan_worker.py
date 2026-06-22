@@ -36,13 +36,15 @@ def _sync_db():
 @celery_app.task(bind=True, max_retries=1, name="app.workers.scan_worker.orchestrate_scan")
 def orchestrate_scan(self: Task, scan_id: str) -> dict:
     """Main scan orchestration: auth → crawl → analyze → report."""
-    from app.models.scan import Scan, ScanPhase, ScanStatus
+    from app.models.scan import AuthMethod, Scan, ScanPhase, ScanStatus
 
     db = _sync_db()
     try:
         scan = db.get(Scan, uuid.UUID(scan_id))
         if not scan:
             return {"error": "Scan not found"}
+        if scan.session and scan.session.auth_method == AuthMethod.BROWSER and scan.status == ScanStatus.AUTHENTICATING:
+            return {"status": "waiting_for_browser_auth"}
 
         scan.status = ScanStatus.CRAWLING
         scan.phase = ScanPhase.CRAWL
@@ -150,6 +152,7 @@ def _persist_resources(scan_id: str, crawl_result, db) -> None:
             is_minified=r.is_minified,
             source_map_url=r.source_map_url,
             discovered_on_page=r.discovered_on_page,
+            extra_metadata=r.metadata,
         )
         db.add(resource)
 
@@ -235,8 +238,23 @@ def run_browser_auth(self: Task, scan_id: str) -> dict:
         scan.status = ScanStatus.PENDING
         db.commit()
 
-        _publish_progress(scan_id, "auth", 100, "Authentication captured. Ready to start crawl.")
+        _publish_progress(scan_id, "auth", 100, "Authentication captured. Starting crawl.")
+        task = orchestrate_scan.delay(scan_id)
+        scan.celery_task_id = task.id
+        db.commit()
         return {"status": "auth_captured", "cookies": len(captured.cookies)}
 
+    except Exception as exc:
+        log.error("browser_auth.failed", scan_id=scan_id, error=str(exc))
+        try:
+            scan = db.get(Scan, uuid.UUID(scan_id))
+            if scan:
+                scan.status = ScanStatus.FAILED
+                scan.error_message = f"Browser authentication failed: {str(exc)[:900]}"
+                db.commit()
+        except Exception:
+            db.rollback()
+        _publish_progress(scan_id, "auth", 0, f"Browser authentication failed: {str(exc)[:200]}")
+        raise
     finally:
         db.close()

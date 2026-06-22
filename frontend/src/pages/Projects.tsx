@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, FolderOpen, Trash2, ChevronRight, Search } from "lucide-react";
+import { Plus, FolderOpen, Trash2, ChevronRight } from "lucide-react";
 import toast from "react-hot-toast";
-import { getProjects, createProject, deleteProject, getScans } from "../lib/api";
+import { getProjects, createProject, deleteProject } from "../lib/api";
 
 export function Projects() {
   const qc = useQueryClient();

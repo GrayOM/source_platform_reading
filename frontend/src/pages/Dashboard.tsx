@@ -12,13 +12,6 @@ const STATUS_ICON: Record<string, React.ReactNode> = {
   pending: <Clock className="w-4 h-4 text-gray-400" />,
 };
 
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: "text-red-400",
-  high: "text-orange-400",
-  medium: "text-yellow-400",
-  low: "text-green-400",
-};
-
 export function Dashboard() {
   const { data: scans = [] } = useQuery({ queryKey: ["scans"], queryFn: () => getScans() });
   const { data: projects = [] } = useQuery({ queryKey: ["projects"], queryFn: getProjects });

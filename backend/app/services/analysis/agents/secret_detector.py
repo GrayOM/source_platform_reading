@@ -72,8 +72,10 @@ class SecretDetectorAgent(BaseAgent):
             for match in re.finditer(pattern, content, re.MULTILINE):
                 matched_value = match.group(0)
 
-                # Skip allowlisted placeholder values
-                if any(av in matched_value.lower() for av in ALLOWLIST_VALUES):
+                # Skip obvious placeholder values without suppressing real-looking
+                # vendor token examples such as AKIA...EXAMPLE.
+                normalized_value = matched_value.lower().strip("'\"")
+                if normalized_value in ALLOWLIST_VALUES:
                     continue
 
                 # Find line number
@@ -100,6 +102,20 @@ class SecretDetectorAgent(BaseAgent):
                         "code_snippet": context_line,
                         "context": "Secret found via static regex scan",
                     },
+                    code_snippet=context_line,
+                    poc={
+                        "type": "secret_leak_verification",
+                        "exposed_location": source_url,
+                        "redacted_secret": redacted,
+                        "impact": "The exposed credential may allow unauthorized access to the linked service.",
+                        "verification": "Confirm the value is present in the downloaded client-side resource and rotate it without using the credential.",
+                        "remediation": "Remove the secret from client-side code and proxy access through a server-side API.",
+                    },
+                    reproduction_steps=[
+                        f"Open the collected resource: {source_url}",
+                        f"Search for the detected {pattern_name} pattern near line {line_num}.",
+                        "Confirm the value is a real credential, then rotate it and remove it from deployed assets.",
+                    ],
                     cwe_id=cwe,
                     cvss_score=self._severity_to_cvss(severity),
                     owasp_category="A02:2021",

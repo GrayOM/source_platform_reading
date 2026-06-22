@@ -16,6 +16,9 @@ class FindingCreate(BaseModel):
     affected_url: str | None = None
     affected_parameter: str | None = None
     evidence: dict = Field(default_factory=dict)
+    code_snippet: str | None = None
+    poc: dict = Field(default_factory=dict)
+    reproduction_steps: list[str] = Field(default_factory=list)
     cwe_id: int | None = None
     cvss_score: float | None = Field(None, ge=0.0, le=10.0)
     cvss_vector: str | None = None
@@ -41,6 +44,9 @@ class FindingOut(BaseModel):
     affected_url: str | None
     affected_parameter: str | None
     evidence: dict
+    code_snippet: str | None
+    poc: dict
+    reproduction_steps: list[str]
     cwe_id: int | None
     cvss_score: float | None
     cvss_vector: str | None

@@ -5,10 +5,12 @@ dangerous eval/innerHTML usage, insecure postMessage handlers, and
 hardcoded secrets embedded in JS bundles.
 """
 import asyncio
+import re
 from pathlib import Path
 
 import structlog
 
+from app.models.finding import Severity, VulnType
 from app.models.resource import ResourceType
 from app.schemas.finding import FindingCreate
 from app.services.analysis.agents.base_agent import AgentContext, BaseAgent
@@ -79,25 +81,112 @@ class JSAnalyzerAgent(BaseAgent):
         return all_findings
 
     def _analyze_chunk(self, code: str, resource_url: str, target_url: str, chunk_idx: int) -> list[FindingCreate]:
-        system = f"""You are a senior web security engineer.
-Analyze the following JavaScript code for security vulnerabilities.
-Target application: {target_url}
-Resource URL: {resource_url}
-{chr(10).join([
-    "Find real, exploitable vulnerabilities. Be specific with code evidence.",
-    "Return ONLY a JSON array of findings or [].",
-    "",
-    "JSON schema per finding:",
-    self._findings_json_schema(),
-])}"""
+        return self._regex_analyze(code, resource_url)
 
-        user = f"```javascript\n{code}\n```"
-        try:
-            raw = self._call_claude(system=system, user=user)
-            return self._parse_findings_json(raw, self.name)
-        except Exception as exc:
-            log.warning("js_analyzer.claude_error", error=str(exc))
-            return []
+    def _regex_analyze(self, code: str, resource_url: str) -> list[FindingCreate]:
+        findings: list[FindingCreate] = []
+        lines = code.splitlines()
+
+        source_pattern = r"(location\.(?:search|hash)|new\s+URLSearchParams|postMessage|event\.data)"
+        sink_pattern = r"(innerHTML|outerHTML|document\.write|dangerouslySetInnerHTML|v-html)"
+        if re.search(source_pattern, code) and re.search(sink_pattern, code):
+            snippet = _first_matching_line(lines, sink_pattern)
+            findings.append(FindingCreate(
+                agent_name=self.name,
+                vulnerability_type=VulnType.XSS,
+                severity=Severity.MEDIUM,
+                title="Potential DOM XSS data flow in JavaScript",
+                description=(
+                    "The JavaScript bundle references browser-controlled input and dangerous DOM insertion sinks. "
+                    "Manual validation is required to confirm sanitization and exploitability."
+                ),
+                affected_url=resource_url,
+                affected_parameter="location/search/hash or message data",
+                evidence={"source_pattern": source_pattern, "sink_pattern": sink_pattern, "code_snippet": snippet},
+                code_snippet=snippet,
+                poc={
+                    "type": "dom_xss_verification",
+                    "test_url": resource_url,
+                    "payload": "<img src=x onerror=alert(1)>",
+                    "expected_result": "Payload must not execute and should be rendered as inert text or rejected.",
+                    "confirmation": "Observe whether script execution occurs after placing payload in the consumed URL parameter or hash.",
+                },
+                reproduction_steps=[
+                    "Identify the route/page that loads this JavaScript resource.",
+                    "Place the payload in the referenced query string or hash parameter.",
+                    "Load the page in a test browser and verify whether the payload reaches the highlighted DOM sink.",
+                ],
+                cwe_id=79,
+                cvss_score=5.4,
+                owasp_category="A03:2021",
+                recommendation="Avoid dangerous DOM sinks or sanitize untrusted input with a vetted HTML sanitizer before insertion.",
+            ))
+
+        message_handlers = re.finditer(r"addEventListener\s*\(\s*['\"]message['\"](?P<body>[\s\S]{0,1500})", code)
+        for match in message_handlers:
+            body = match.group("body")
+            if "origin" not in body:
+                snippet = body.splitlines()[0][:300] if body else match.group(0)[:300]
+                findings.append(FindingCreate(
+                    agent_name=self.name,
+                    vulnerability_type=VulnType.XSS,
+                    severity=Severity.MEDIUM,
+                    title="postMessage handler without visible origin validation",
+                    description="A message event handler was found without an obvious event.origin allowlist check nearby.",
+                    affected_url=resource_url,
+                    affected_parameter="postMessage event.data",
+                    evidence={"code_snippet": snippet, "context": "message handler lacks visible origin validation"},
+                    code_snippet=snippet,
+                    poc={
+                        "type": "postmessage_verification",
+                        "test": "Send a crafted postMessage from a different origin in a controlled test page.",
+                        "expected_result": "The application should reject messages from untrusted origins.",
+                        "confirmation": "No state change or DOM update should occur unless event.origin matches an allowlist.",
+                    },
+                    reproduction_steps=[
+                        "Open the affected page in a browser.",
+                        "From a controlled different-origin page, call targetWindow.postMessage with test data.",
+                        "Confirm whether the message handler accepts the data without checking event.origin.",
+                    ],
+                    cwe_id=346,
+                    cvss_score=5.3,
+                    owasp_category="A01:2021",
+                    recommendation="Validate event.origin against an explicit allowlist before processing event.data.",
+                ))
+                break
+
+        storage_pattern = r"(localStorage|sessionStorage)\.(?:setItem|getItem)\s*\(\s*['\"]([^'\"]*(?:token|jwt|access_token|refresh_token)[^'\"]*)['\"]"
+        for match in re.finditer(storage_pattern, code, re.IGNORECASE):
+            snippet = _line_for_offset(code, lines, match.start())
+            findings.append(FindingCreate(
+                agent_name=self.name,
+                vulnerability_type=VulnType.INSECURE_STORAGE,
+                severity=Severity.LOW,
+                title="Token-like value stored in browser storage",
+                description="Client-side code stores or reads token-like values from localStorage/sessionStorage.",
+                affected_url=resource_url,
+                affected_parameter=match.group(2),
+                evidence={"storage": match.group(1), "key": match.group(2), "code_snippet": snippet},
+                code_snippet=snippet,
+                poc={
+                    "type": "storage_verification",
+                    "storage": match.group(1),
+                    "key": match.group(2),
+                    "verification": "Inspect browser developer tools after login and confirm whether sensitive tokens are stored under this key.",
+                },
+                reproduction_steps=[
+                    "Authenticate to the application in a test browser.",
+                    f"Open developer tools and inspect {match.group(1)}.",
+                    f"Check whether `{match.group(2)}` contains an access token, refresh token, or JWT.",
+                ],
+                cwe_id=922,
+                cvss_score=3.1,
+                owasp_category="A02:2021",
+                recommendation="Prefer HttpOnly Secure SameSite cookies for session tokens and keep token lifetimes short.",
+            ))
+            break
+
+        return findings
 
     @staticmethod
     def _chunk_js(content: str, max_chars: int = 60_000) -> list[str]:
@@ -115,3 +204,18 @@ Resource URL: {resource_url}
             chunks.append(content[start:end])
             start = end
         return chunks
+
+
+def _first_matching_line(lines: list[str], pattern: str) -> str:
+    regex = re.compile(pattern)
+    for line in lines:
+        if regex.search(line):
+            return line.strip()[:500]
+    return ""
+
+
+def _line_for_offset(code: str, lines: list[str], offset: int) -> str:
+    line_num = code[:offset].count("\n")
+    if 0 <= line_num < len(lines):
+        return lines[line_num].strip()[:500]
+    return ""

@@ -10,7 +10,6 @@ celery_app = Celery(
     backend=settings.redis_url,
     include=[
         "app.workers.scan_worker",
-        "app.workers.analysis_worker",
         "app.workers.report_worker",
     ],
 )
@@ -26,7 +25,7 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_routes={
         "app.workers.scan_worker.*": {"queue": "crawl"},
-        "app.workers.analysis_worker.*": {"queue": "analysis"},
+        "app.workers.scan_worker.orchestrate_scan": {"queue": "crawl"},
         "app.workers.report_worker.*": {"queue": "reports"},
         "app.workers.scan_worker.run_browser_auth": {"queue": "auth"},
     },

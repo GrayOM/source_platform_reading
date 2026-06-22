@@ -36,7 +36,7 @@ class Resource(Base):
     source_map_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     discovered_on_page: Mapped[str | None] = mapped_column(Text, nullable=True)
     http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    extra_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     collected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

@@ -55,19 +55,25 @@ async def create_scan(payload: ScanCreate, current_user: CurrentUser, db: DB) ->
     await _store_session(scan.id, payload.auth, db)
     await db.flush()
 
-    task = orchestrate_scan.delay(str(scan.id))
-    scan.celery_task_id = task.id
+    if payload.auth.method == AuthMethod.BROWSER:
+        scan.status = ScanStatus.PENDING
+        scan.celery_task_id = None
+    else:
+        task = orchestrate_scan.delay(str(scan.id))
+        scan.celery_task_id = task.id
     return scan
 
 
 async def _store_session(scan_id: uuid.UUID, auth: AuthConfig, db: DB) -> None:
     import json
     from app.core.security import encrypt_session_data
+    from app.services.auth.browser_auth import normalize_cookies
 
     session = ScanSession(scan_id=scan_id, auth_method=auth.method)
 
     if auth.method == AuthMethod.COOKIES and auth.cookies_json:
-        session.cookies_encrypted = encrypt_session_data(auth.cookies_json.encode("utf-8"))
+        cookies = normalize_cookies(auth.cookies_json)
+        session.cookies_encrypted = encrypt_session_data(json.dumps(cookies).encode("utf-8"))
 
     if auth.method == AuthMethod.BEARER and auth.bearer_token:
         headers = {"Authorization": f"Bearer {auth.bearer_token}"}

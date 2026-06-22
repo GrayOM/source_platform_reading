@@ -2,7 +2,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import case, select
 
 from app.api.deps import DB, CurrentUser
 from app.models.finding import Finding, Severity
@@ -32,7 +32,15 @@ async def list_findings(
         q = q.where(Finding.scan_id == scan_id)
     if severity:
         q = q.where(Finding.severity == severity)
-    q = q.order_by(Finding.severity, Finding.created_at.desc()).limit(limit).offset(offset)
+    severity_rank = case(
+        (Finding.severity == Severity.CRITICAL, 0),
+        (Finding.severity == Severity.HIGH, 1),
+        (Finding.severity == Severity.MEDIUM, 2),
+        (Finding.severity == Severity.LOW, 3),
+        (Finding.severity == Severity.INFO, 4),
+        else_=5,
+    )
+    q = q.order_by(severity_rank, Finding.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(q)
     return list(result.scalars().all())
 

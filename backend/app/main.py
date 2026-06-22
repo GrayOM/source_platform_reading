@@ -17,8 +17,9 @@ log = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("sss_platform.startup", environment=settings.environment)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    if settings.environment == "development":
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
     settings.scan_data_path.mkdir(parents=True, exist_ok=True)
     yield
     log.info("sss_platform.shutdown")

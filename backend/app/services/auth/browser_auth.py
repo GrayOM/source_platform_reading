@@ -140,3 +140,35 @@ def parse_netscape_cookies(text: str) -> list[dict]:
                 "value": parts[6],
             })
     return cookies
+
+
+def normalize_cookies(raw: str) -> list[dict]:
+    """Accept DevTools JSON array, {"cookies": [...]}, or Netscape cookie text."""
+    cookies = parse_cookies_json(raw)
+    if not cookies:
+        cookies = parse_netscape_cookies(raw)
+    normalized = []
+    for cookie in cookies:
+        if not isinstance(cookie, dict):
+            continue
+        item = {
+            "name": str(cookie.get("name", "")),
+            "value": str(cookie.get("value", "")),
+            "domain": cookie.get("domain"),
+            "path": cookie.get("path") or "/",
+        }
+        if not item["name"] or not item["domain"]:
+            continue
+        if "expires" in cookie:
+            try:
+                item["expires"] = int(float(cookie["expires"]))
+            except (TypeError, ValueError):
+                pass
+        if "httpOnly" in cookie:
+            item["httpOnly"] = bool(cookie["httpOnly"])
+        if "secure" in cookie:
+            item["secure"] = bool(cookie["secure"])
+        if cookie.get("sameSite") in ("Strict", "Lax", "None"):
+            item["sameSite"] = cookie["sameSite"]
+        normalized.append(item)
+    return normalized

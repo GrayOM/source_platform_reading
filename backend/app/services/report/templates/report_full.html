@@ -75,6 +75,34 @@
   <h2>Executive Summary</h2>
   <p>{{ executive_summary }}</p>
 
+  <h2>Assessment Overview</h2>
+  <table>
+    <tr><th>Target URL</th><td>{{ target_url }}</td></tr>
+    <tr><th>Scan Time</th><td>{{ scan.started_at or scan.created_at }} - {{ scan.completed_at or 'N/A' }}</td></tr>
+    <tr><th>Authentication</th><td>{{ scan.session.auth_method.value if scan.session else 'none' }}</td></tr>
+    <tr><th>Collected Pages</th><td>{{ pages | length }}</td></tr>
+    <tr><th>Collected Resources</th><td>{{ resources | length }}</td></tr>
+    <tr><th>Findings</th><td>{{ findings_count }}</td></tr>
+  </table>
+
+  <h2>Collection Results</h2>
+  <h3>Pages</h3>
+  <ul>
+    {% for page in pages[:50] %}<li><code>{{ page.url }}</code> ({{ page.http_status or 'n/a' }})</li>{% else %}<li>No pages recorded.</li>{% endfor %}
+  </ul>
+  <h3>JavaScript Files</h3>
+  <ul>
+    {% for js in js_files[:50] %}<li><code>{{ js.url }}</code></li>{% else %}<li>No JavaScript files recorded.</li>{% endfor %}
+  </ul>
+  <h3>API Endpoint Candidates</h3>
+  <ul>
+    {% for endpoint in api_candidates[:50] %}<li><code>{{ endpoint }}</code></li>{% else %}<li>No API endpoint candidates recorded.</li>{% endfor %}
+  </ul>
+  <h3>Source Maps</h3>
+  <ul>
+    {% for sm in source_maps[:50] %}<li><code>{{ sm.url }}</code></li>{% else %}<li>No source maps recorded.</li>{% endfor %}
+  </ul>
+
   <h2>Findings ({{ findings_count }} total)</h2>
   {% for finding in findings %}
   <div class="finding">
@@ -107,8 +135,20 @@
 
       <p>{{ finding.description }}</p>
 
-      {% if finding.evidence and finding.evidence.code_snippet %}
-      <pre>{{ finding.evidence.code_snippet }}</pre>
+      {% if finding.code_snippet or (finding.evidence and finding.evidence.code_snippet) %}
+      <pre>{{ finding.code_snippet or finding.evidence.code_snippet }}</pre>
+      {% endif %}
+
+      {% if finding.poc %}
+      <h3>PoC</h3>
+      <pre>{{ finding.poc | tojson(indent=2) }}</pre>
+      {% endif %}
+
+      {% if finding.reproduction_steps %}
+      <h3>Reproduction Steps</h3>
+      <ol>
+        {% for step in finding.reproduction_steps %}<li>{{ step }}</li>{% endfor %}
+      </ol>
       {% endif %}
 
       <div class="recommendation">

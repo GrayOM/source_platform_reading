@@ -59,11 +59,18 @@ def decrypt_session_data(ciphertext: bytes) -> bytes:
 
 def validate_target_url(url: str) -> None:
     """SSRF protection: block private/loopback/link-local addresses."""
+    validate_public_http_url(url)
+
+
+def validate_public_http_url(url: str) -> None:
+    """SSRF protection for target and downloaded resource URLs."""
     import ipaddress
     import socket
     from urllib.parse import urlparse
 
     parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Invalid URL: only http and https are allowed")
     hostname = parsed.hostname
     if not hostname:
         raise ValueError("Invalid URL: no hostname")

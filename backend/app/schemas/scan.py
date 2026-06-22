@@ -16,6 +16,7 @@ class ScanConfig(BaseModel):
     wait_for_network_idle: bool = True
     screenshot_pages: bool = True
     analyze_source_maps: bool = True
+    allow_external_resources: bool = False
 
 
 class AuthConfig(BaseModel):

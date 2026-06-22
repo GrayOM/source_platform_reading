@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     max_resource_size_mb: int = 10
     crawl_concurrency: int = 5
     crawl_timeout_seconds: int = 30
+    allow_external_resources: bool = False
 
     # AI
     anthropic_api_key: str = ""
