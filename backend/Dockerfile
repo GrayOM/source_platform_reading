@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev curl \
+    gcc libpq-dev curl gosu \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -12,7 +12,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+RUN groupadd --system app && useradd --system --gid app --home-dir /home/app --create-home app \
+    && mkdir -p /data/scans \
+    && chmod +x /app/docker-entrypoint.sh \
+    && chown -R app:app /app /data /home/app
 
 EXPOSE 8000
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

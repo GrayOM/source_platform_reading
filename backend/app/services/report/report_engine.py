@@ -290,6 +290,6 @@ class ReportEngine:
             import weasyprint
             weasyprint.HTML(filename=str(html_path)).write_pdf(str(pdf_path))
         except Exception as exc:
-            log.error("report.pdf_failed_falling_back_to_html", error=str(exc), html_path=str(html_path))
+            log.warning("report.pdf_failed_falling_back_to_html", error=str(exc), html_path=str(html_path))
             return html_path
         return pdf_path

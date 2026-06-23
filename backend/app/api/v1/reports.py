@@ -64,9 +64,12 @@ async def download_report(report_id: uuid.UUID, current_user: CurrentUser, db: D
     if not report.file_path or not Path(report.file_path).exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report file not ready")
 
+    file_path = Path(report.file_path)
+    suffix = file_path.suffix.lower().lstrip(".")
+    media_format = "markdown" if suffix == "md" else suffix or report.format.value
     media_types = {"pdf": "application/pdf", "html": "text/html", "json": "application/json", "markdown": "text/markdown"}
     return FileResponse(
         path=report.file_path,
-        media_type=media_types.get(report.format.value, "application/octet-stream"),
-        filename=Path(report.file_path).name,
+        media_type=media_types.get(media_format, "application/octet-stream"),
+        filename=file_path.name,
     )

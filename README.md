@@ -65,7 +65,7 @@ Nginx reverse proxy
 - Docker Compose v2+
 - Node.js 20+ and Python 3.12+ only for local development
 
-AI API key는 선택 사항입니다. 현재 MVP의 핵심 E2E finding은 deterministic analyzer로 생성됩니다. AI round2 분석을 사용하려면 별도 API key 설정이 필요합니다.
+AI API key는 선택 사항입니다. 현재 MVP의 핵심 E2E finding은 deterministic analyzer로 생성됩니다. `ANTHROPIC_API_KEY`가 비어 있거나 placeholder 값이면 AI round2 분석은 실패가 아니라 `AI analysis skipped - API key not configured` 상태로 건너뛰며, deterministic round1 finding과 보고서 생성은 계속 동작합니다. AI round2 분석을 사용하려면 별도 API key 설정이 필요합니다.
 
 ## Quick Start
 
@@ -222,7 +222,7 @@ Finding 상세에는 가능한 경우 다음 필드가 포함됩니다.
 - `HTML`: 브라우저로 열어보기 좋은 전체 보고서
 - `Markdown`: 이슈, PR, 문서 저장소에 첨부하기 좋은 형식
 - `JSON`: 다른 도구와 연동하기 위한 구조화 데이터
-- `PDF`: 실험적 지원. 실패해도 HTML/Markdown/JSON 보고서 기능은 막지 않도록 fallback 처리합니다.
+- `PDF`: 실험적 지원. PDF 렌더링이 실패하면 같은 내용의 HTML report path로 fallback하며, HTML/Markdown/JSON 보고서 기능은 막지 않습니다.
 
 검증된 다운로드 형식:
 
@@ -377,10 +377,9 @@ docker exec source_platform_reading-nginx-1 wget -qO- http://backend:8000/health
 
 MVP 이후 남은 작업:
 
-- Run Celery workers as a non-root user
-- Gracefully skip AI round2 analyzers when API key is not configured
+- Verify Celery non-root worker behavior across more deployment targets
 - Frontend design and UX polish
-- PDF report generation stabilization
+- Improve native PDF rendering stability beyond the current HTML fallback
 - Broader browser-auth E2E coverage
 - More precise false-positive reduction for static findings
 

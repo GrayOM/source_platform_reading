@@ -1,27 +1,31 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRight, FolderOpen, Loader2, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, FolderOpen, Trash2, ChevronRight } from "lucide-react";
 import toast from "react-hot-toast";
-import { getProjects, createProject, deleteProject } from "../lib/api";
+import { Link } from "react-router-dom";
+import { Button, Card, EmptyState, Field, PageHeader, PageShell, TextArea, TextInput } from "../components/ui";
+import { createProject, deleteProject, getProjects } from "../lib/api";
 
 export function Projects() {
   const qc = useQueryClient();
   const [showNew, setShowNew] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [formError, setFormError] = useState("");
 
-  const { data: projects = [] } = useQuery({ queryKey: ["projects"], queryFn: getProjects });
+  const { data: projects = [], isLoading } = useQuery({ queryKey: ["projects"], queryFn: getProjects });
 
   const createMutation = useMutation({
-    mutationFn: () => createProject({ name, description }),
+    mutationFn: () => createProject({ name: name.trim(), description: description.trim() || undefined }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["projects"] });
       setShowNew(false);
       setName("");
       setDescription("");
+      setFormError("");
       toast.success("Project created");
     },
+    onError: (err: any) => setFormError(err.response?.data?.detail ?? "Failed to create project"),
   });
 
   const deleteMutation = useMutation({
@@ -30,96 +34,109 @@ export function Projects() {
       qc.invalidateQueries({ queryKey: ["projects"] });
       toast.success("Project deleted");
     },
+    onError: () => toast.error("Failed to delete project"),
   });
 
+  const submit = () => {
+    if (!name.trim()) {
+      setFormError("Project name is required.");
+      return;
+    }
+    createMutation.mutate();
+  };
+
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-2xl font-bold text-white">Projects</h1>
-        <button
-          onClick={() => setShowNew(true)}
-          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
-        >
-          <Plus className="w-4 h-4" /> New Project
-        </button>
-      </div>
+    <PageShell className="max-w-5xl">
+      <PageHeader
+        title="Projects"
+        description="Group assessments by application, client, environment, or testing scope."
+        action={
+          <Button onClick={() => setShowNew((value) => !value)}>
+            <Plus className="h-4 w-4" />
+            New Project
+          </Button>
+        }
+      />
 
       {showNew && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
-          <h2 className="text-sm font-semibold text-white mb-4">New Project</h2>
-          <div className="space-y-3">
-            <input
-              type="text"
-              placeholder="Project name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500"
-            />
-            <input
-              type="text"
-              placeholder="Description (optional)"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500"
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => createMutation.mutate()}
-                disabled={!name || createMutation.isPending}
-                className="bg-emerald-500 hover:bg-emerald-400 disabled:bg-gray-700 text-black font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
-              >
-                Create
-              </button>
-              <button
-                onClick={() => setShowNew(false)}
-                className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-lg text-sm transition-colors"
-              >
+        <Card className="mb-6 p-5">
+          <div className="mb-4">
+            <h2 className="font-semibold text-white">Create project</h2>
+            <p className="mt-1 text-sm text-slate-500">Use a clear scope name so scan results and reports stay organized.</p>
+          </div>
+          <div className="grid gap-4">
+            <Field label="Project name" error={formError}>
+              <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Production web app" />
+            </Field>
+            <Field label="Description" hint="Optional context such as target scope, owner, or environment.">
+              <TextArea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="External assessment scope for the public web application." />
+            </Field>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={submit} disabled={createMutation.isPending}>
+                {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                Create project
+              </Button>
+              <Button variant="secondary" onClick={() => setShowNew(false)}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
-        </div>
+        </Card>
       )}
 
-      <div className="space-y-3">
-        {projects.length === 0 ? (
-          <div className="text-center py-16 text-gray-500">
-            <FolderOpen className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            <p>No projects yet. Create one to get started.</p>
-          </div>
-        ) : (
-          projects.map((p: any) => (
-            <div
-              key={p.id}
-              className="group flex items-center gap-4 bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-gray-700 transition-colors"
-            >
-              <FolderOpen className="w-5 h-5 text-emerald-400 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-white">{p.name}</div>
-                {p.description && (
-                  <div className="text-xs text-gray-500 mt-0.5 truncate">{p.description}</div>
-                )}
-                <div className="text-xs text-gray-600 mt-1">{p.scan_count} scans</div>
+      {isLoading ? (
+        <Card className="p-8 text-sm text-slate-500">Loading projects...</Card>
+      ) : projects.length === 0 ? (
+        <EmptyState
+          icon={<FolderOpen className="h-10 w-10" />}
+          title="No projects yet"
+          description="Create a project first, then start a scan from that scope."
+          action={
+            <Button onClick={() => setShowNew(true)}>
+              <Plus className="h-4 w-4" />
+              Create project
+            </Button>
+          }
+        />
+      ) : (
+        <div className="grid gap-3">
+          {projects.map((project: any) => (
+            <Card key={project.id} className="group p-5 transition-colors hover:border-slate-700">
+              <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2">
+                      <FolderOpen className="h-4 w-4 text-emerald-300" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-semibold text-white">{project.name}</h3>
+                      <p className="mt-0.5 truncate text-xs text-slate-500">{project.description || "No description"}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                  <span className="rounded-md border border-slate-800 bg-slate-950/60 px-2.5 py-1 text-xs font-semibold text-slate-300">
+                    {project.scan_count ?? 0} scans
+                  </span>
+                  <Link to={`/scans/new?project=${project.id}`} className="rounded-lg px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-slate-800 hover:text-emerald-200">
+                    New scan
+                  </Link>
+                  <button
+                    onClick={() => {
+                      if (confirm(`Delete "${project.name}"?`)) deleteMutation.mutate(project.id);
+                    }}
+                    className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-red-950/40 hover:text-red-300"
+                    aria-label={`Delete ${project.name}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                  <ChevronRight className="hidden h-4 w-4 text-slate-700 sm:block" />
+                </div>
               </div>
-              <Link
-                to={`/scans/new?project=${p.id}`}
-                className="opacity-0 group-hover:opacity-100 text-xs text-emerald-400 hover:underline transition-opacity shrink-0"
-              >
-                + Scan
-              </Link>
-              <button
-                onClick={() => {
-                  if (confirm(`Delete "${p.name}"?`)) deleteMutation.mutate(p.id);
-                }}
-                className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-600 hover:text-red-400 transition-all"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-              <ChevronRight className="w-4 h-4 text-gray-700" />
-            </div>
-          ))
-        )}
-      </div>
-    </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </PageShell>
   );
 }

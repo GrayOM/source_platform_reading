@@ -12,12 +12,12 @@ from pathlib import Path
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.finding import Finding
+from app.models.finding import Finding, Severity, VulnType
 from app.models.resource import Resource
 from app.schemas.finding import FindingCreate
 from app.services.analysis.agents.api_mapper import APIMapperAgent
 from app.services.analysis.agents.auth_analyzer import AuthAnalyzerAgent
-from app.services.analysis.agents.base_agent import AgentContext
+from app.services.analysis.agents.base_agent import AI_SKIP_MESSAGE, AIAnalysisSkipped, AgentContext, is_ai_analysis_configured
 from app.services.analysis.agents.business_logic_analyzer import BusinessLogicAgent
 from app.services.analysis.agents.js_analyzer import JSAnalyzerAgent
 from app.services.analysis.agents.secret_detector import SecretDetectorAgent
@@ -88,27 +88,50 @@ class AnalysisOrchestrator:
         ]
 
         # Round 2: sequential (each agent sees prior findings)
-        log.info("analysis.round2_start", scan_id=self.scan_id)
-        if self.progress_callback:
-            self.progress_callback("Running context-aware agents (Round 2)...")
+        if not is_ai_analysis_configured():
+            log.info("analysis.round2_skipped", scan_id=self.scan_id, reason=AI_SKIP_MESSAGE)
+            if self.progress_callback:
+                self.progress_callback(AI_SKIP_MESSAGE)
+            await self._persist_findings([self._ai_skip_finding()])
+        else:
+            log.info("analysis.round2_start", scan_id=self.scan_id)
+            if self.progress_callback:
+                self.progress_callback("Running context-aware agents (Round 2)...")
 
-        for agent in self._agents_round2:
-            try:
-                new_findings = await agent.analyze(context)
-                log.info("analysis.agent_done", agent=agent.name, count=len(new_findings))
-                saved = await self._persist_findings(new_findings)
-                context.findings_so_far.extend(
-                    {"severity": f.severity.value, "vulnerability_type": f.vulnerability_type.value, "title": f.title}
-                    for f in saved
-                )
-            except Exception as exc:
-                log.error("analysis.agent_failed", agent=agent.name, error=str(exc))
+            for agent in self._agents_round2:
+                try:
+                    new_findings = await agent.analyze(context)
+                    log.info("analysis.agent_done", agent=agent.name, count=len(new_findings))
+                    saved = await self._persist_findings(new_findings)
+                    context.findings_so_far.extend(
+                        {"severity": f.severity.value, "vulnerability_type": f.vulnerability_type.value, "title": f.title}
+                        for f in saved
+                    )
+                except AIAnalysisSkipped as exc:
+                    log.info("analysis.agent_skipped", agent=agent.name, reason=str(exc))
+                except Exception as exc:
+                    log.error("analysis.agent_failed", agent=agent.name, error=str(exc))
 
         from sqlalchemy import select
         result = await self.db.execute(
             select(Finding).where(Finding.scan_id == uuid.UUID(self.scan_id))
         )
         return list(result.scalars().all())
+
+    def _ai_skip_finding(self) -> FindingCreate:
+        return FindingCreate(
+            agent_name="ai_round2",
+            vulnerability_type=VulnType.OTHER,
+            severity=Severity.INFO,
+            title=AI_SKIP_MESSAGE,
+            description=(
+                "Optional AI round2 analysis was skipped because ANTHROPIC_API_KEY is empty "
+                "or still set to a placeholder value. Deterministic round1 analysis completed normally."
+            ),
+            affected_url=self.target_url,
+            evidence={"reason": "ANTHROPIC_API_KEY is not configured"},
+            recommendation="Set a valid ANTHROPIC_API_KEY only when optional AI round2 analysis is needed.",
+        )
 
     async def _persist_findings(self, findings: list[FindingCreate]) -> list[Finding]:
         if not findings:

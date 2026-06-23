@@ -14,6 +14,32 @@ from app.schemas.finding import FindingCreate
 settings = get_settings()
 log = structlog.get_logger()
 
+AI_SKIP_MESSAGE = "AI analysis skipped - API key not configured"
+
+
+class AIAnalysisSkipped(RuntimeError):
+    """Raised when optional AI analysis is disabled by configuration."""
+
+
+def is_ai_analysis_configured() -> bool:
+    key = (settings.anthropic_api_key or "").strip()
+    if not key:
+        return False
+
+    lowered = key.lower()
+    placeholders = {
+        "sk-ant-...",
+        "sk-ant-test",
+        "placeholder",
+        "your_api_key",
+        "change_me",
+        "changeme",
+    }
+    if lowered in placeholders or "..." in lowered:
+        return False
+
+    return key.startswith("sk-ant-api") and len(key) > 40
+
 
 @dataclass
 class AgentContext:
@@ -31,13 +57,19 @@ class BaseAgent(ABC):
     name: str = "base"
 
     def __init__(self):
-        self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        self._client = None
 
     @abstractmethod
     async def analyze(self, context: AgentContext) -> list[FindingCreate]:
         """Run analysis and return findings."""
 
     def _call_claude(self, system: str, user: str, max_tokens: int = 4096) -> str:
+        if not is_ai_analysis_configured():
+            raise AIAnalysisSkipped(AI_SKIP_MESSAGE)
+
+        if self._client is None:
+            self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
         response = self._client.messages.create(
             model=settings.ai_model,
             max_tokens=max_tokens,

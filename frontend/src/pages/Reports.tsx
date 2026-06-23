@@ -1,16 +1,23 @@
-import { useState } from "react";
-import { useParams } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { FileText, Download, Loader2, Plus } from "lucide-react";
-import toast from "react-hot-toast";
-import { getScanReports, generateReport, downloadReport } from "../lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
+import { Download, FileJson, FileText, Info, Loader2, Plus } from "lucide-react";
+import { useState } from "react";
+import toast from "react-hot-toast";
+import { useParams } from "react-router-dom";
+import { Badge, Button, Card, EmptyState, PageHeader, PageShell, Select } from "../components/ui";
+import { downloadReport, generateReport, getScanReports } from "../lib/api";
 
-const FORMATS = ["pdf", "html", "json", "markdown"] as const;
+const FORMATS = [
+  { value: "html", label: "HTML", desc: "Browser-friendly report" },
+  { value: "markdown", label: "Markdown", desc: "PRs and documentation" },
+  { value: "json", label: "JSON", desc: "Tooling and automation" },
+  { value: "pdf", label: "PDF", desc: "Experimental; falls back to HTML" },
+] as const;
+
 const TYPES = ["full", "kisa", "owasp", "executive", "technical"] as const;
 const TYPE_LABELS: Record<string, string> = {
   full: "Full Report",
-  kisa: "KISA Format (한국)",
+  kisa: "KISA Format",
   owasp: "OWASP Top 10",
   executive: "Executive Summary",
   technical: "Technical Details",
@@ -19,15 +26,16 @@ const TYPE_LABELS: Record<string, string> = {
 export function Reports() {
   const { scanId } = useParams<{ scanId: string }>();
   const qc = useQueryClient();
-  const [format, setFormat] = useState<string>("pdf");
+  const [format, setFormat] = useState<string>("html");
   const [type, setType] = useState<string>("full");
+  const [downloadingId, setDownloadingId] = useState<string>("");
 
   const { data: reports = [], isLoading } = useQuery({
     queryKey: ["reports", scanId],
     queryFn: () => getScanReports(scanId!),
     refetchInterval: (query) => {
       const data = query.state.data as any[] | undefined;
-      return (data ?? []).some((r: any) => !r.file_path) ? 3000 : false;
+      return (data ?? []).some((report: any) => !report.file_path) ? 3000 : false;
     },
   });
 
@@ -37,103 +45,123 @@ export function Reports() {
       toast.success("Report generation started");
       qc.invalidateQueries({ queryKey: ["reports", scanId] });
     },
-    onError: (err: any) => toast.error(err.response?.data?.detail ?? "Failed"),
+    onError: (err: any) => toast.error(err.response?.data?.detail ?? "Failed to generate report"),
   });
 
   const downloadMutation = useMutation({
     mutationFn: (reportId: string) => downloadReport(reportId),
+    onMutate: (reportId) => setDownloadingId(reportId),
+    onSuccess: () => toast.success("Report downloaded"),
     onError: (err: any) => toast.error(err.response?.data?.detail ?? "Download failed"),
+    onSettled: () => setDownloadingId(""),
   });
 
   return (
-    <div className="p-8 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold text-white mb-6">Reports</h1>
+    <PageShell className="max-w-5xl">
+      <PageHeader title="Reports" description="Generate and download scan reports with findings, PoC, reproduction steps, and collection summaries." />
 
-      {/* Generate new */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
-        <h2 className="text-sm font-semibold text-gray-300 mb-4">Generate New Report</h2>
-        <div className="grid grid-cols-2 gap-4 mb-4">
+      <Card className="mb-6 p-5">
+        <div className="mb-5">
+          <h2 className="font-semibold text-white">Generate report</h2>
+          <p className="mt-1 text-sm text-slate-500">HTML, Markdown, and JSON are the stable export formats. PDF uses HTML fallback if rendering fails.</p>
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-[1fr_260px]">
           <div>
-            <label className="text-xs text-gray-500 block mb-2">Format</label>
-            <div className="flex gap-2 flex-wrap">
-              {FORMATS.map((f) => (
+            <div className="mb-2 text-sm font-medium text-slate-300">Format</div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {FORMATS.map((item) => (
                 <button
-                  key={f}
-                  onClick={() => setFormat(f)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium uppercase transition-colors ${
-                    format === f ? "bg-emerald-500 text-black" : "bg-gray-800 text-gray-400 hover:text-white"
+                  key={item.value}
+                  type="button"
+                  onClick={() => setFormat(item.value)}
+                  className={`rounded-lg border p-4 text-left transition-colors ${
+                    format === item.value ? "border-emerald-500/60 bg-emerald-500/10" : "border-slate-800 bg-slate-950/40 hover:border-slate-700"
                   }`}
                 >
-                  {f}
+                  <div className="text-sm font-semibold text-white">{item.label}</div>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">{item.desc}</p>
                 </button>
               ))}
             </div>
           </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-2">Type</label>
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
-            >
-              {TYPES.map((t) => (
-                <option key={t} value={t}>{TYPE_LABELS[t] ?? t}</option>
-              ))}
-            </select>
+
+          <div className="grid content-start gap-4">
+            <label>
+              <span className="mb-2 block text-sm font-medium text-slate-300">Report type</span>
+              <Select value={type} onChange={(e) => setType(e.target.value)}>
+                {TYPES.map((item) => (
+                  <option key={item} value={item}>
+                    {TYPE_LABELS[item] ?? item}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            {format === "pdf" && (
+              <div className="flex gap-2 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-xs leading-5 text-sky-200">
+                <Info className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                PDF is experimental. If PDF rendering fails, the generated report downloads as HTML.
+              </div>
+            )}
+            <Button onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending}>
+              {generateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Generate
+            </Button>
           </div>
         </div>
-        <button
-          onClick={() => generateMutation.mutate()}
-          disabled={generateMutation.isPending}
-          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-gray-700 text-black font-semibold px-4 py-2.5 rounded-lg text-sm transition-colors"
-        >
-          {generateMutation.isPending ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Plus className="w-4 h-4" />
-          )}
-          Generate
-        </button>
-      </div>
+      </Card>
 
-      {/* Reports list */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl divide-y divide-gray-800">
+      <Card>
+        <div className="border-b border-slate-800 px-5 py-4">
+          <h2 className="font-semibold text-white">Generated reports</h2>
+          <p className="mt-0.5 text-xs text-slate-500">{reports.length} report{reports.length === 1 ? "" : "s"}</p>
+        </div>
+
         {isLoading ? (
-          <div className="p-8 text-center text-gray-500">Loading...</div>
+          <div className="p-8 text-sm text-slate-500">Loading reports...</div>
         ) : reports.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">
-            <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
-            <p>No reports yet</p>
+          <div className="p-5">
+            <EmptyState icon={<FileText className="h-10 w-10" />} title="No reports yet" description="Generate a report after the scan completes." />
           </div>
         ) : (
-          reports.map((r: any) => (
-            <div key={r.id} className="flex items-center gap-4 p-4">
-              <FileText className="w-5 h-5 text-gray-500 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-white">
-                  {TYPE_LABELS[r.report_type] ?? r.report_type} — {r.format.toUpperCase()}
+          <div className="divide-y divide-slate-800">
+            {reports.map((report: any) => {
+              const isJson = report.format === "json";
+              return (
+                <div key={report.id} className="grid gap-3 px-5 py-4 md:grid-cols-[auto_1fr_auto] md:items-center">
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+                    {isJson ? <FileJson className="h-5 w-5 text-sky-300" /> : <FileText className="h-5 w-5 text-emerald-300" />}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-white">{TYPE_LABELS[report.report_type] ?? report.report_type}</span>
+                      <Badge tone="neutral">{report.format}</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {formatDistanceToNow(new Date(report.created_at), { addSuffix: true })}
+                      {report.file_size ? ` · ${(report.file_size / 1024).toFixed(0)} KB` : " · queued"}
+                    </p>
+                    {report.format === "pdf" && report.file_path?.endsWith(".html") && (
+                      <p className="mt-1 text-xs text-sky-300">PDF renderer fell back to HTML output.</p>
+                    )}
+                  </div>
+                  {report.file_path ? (
+                    <Button variant="secondary" onClick={() => downloadMutation.mutate(report.id)} disabled={downloadMutation.isPending && downloadingId === report.id}>
+                      {downloadMutation.isPending && downloadingId === report.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      Download
+                    </Button>
+                  ) : (
+                    <span className="inline-flex items-center gap-2 text-sm text-slate-500">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Generating
+                    </span>
+                  )}
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5">
-                  {formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}
-                  {r.file_size ? ` · ${(r.file_size / 1024).toFixed(0)} KB` : ""}
-                </div>
-              </div>
-              {r.file_path ? (
-                <button
-                  onClick={() => downloadMutation.mutate(r.id)}
-                  className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 font-medium"
-                >
-                  <Download className="w-3.5 h-3.5" /> Download
-                </button>
-              ) : (
-                <span className="flex items-center gap-1.5 text-xs text-gray-500">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...
-                </span>
-              )}
-            </div>
-          ))
+              );
+            })}
+          </div>
         )}
-      </div>
-    </div>
+      </Card>
+    </PageShell>
   );
 }

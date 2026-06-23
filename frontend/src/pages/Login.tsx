@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, Shield } from "lucide-react";
 import toast from "react-hot-toast";
 import { login, register } from "../lib/api";
+import { Button, Card, Field, TextInput } from "../components/ui";
 
 export function Login() {
   const navigate = useNavigate();
@@ -11,9 +12,11 @@ export function Login() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
     setLoading(true);
     try {
       if (mode === "login") {
@@ -27,71 +30,94 @@ export function Login() {
         setMode("login");
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.detail ?? "An error occurred");
+      const message = err.response?.data?.detail ?? "Unable to complete the request. Check your credentials and try again.";
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col items-center mb-8">
-          <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-emerald-500/10 mb-4">
-            <Shield className="w-8 h-8 text-emerald-400" />
+    <div className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
+      <div className="mx-auto grid min-h-[calc(100vh-4rem)] w-full max-w-6xl items-center gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+        <section className="hidden lg:block">
+          <div className="mb-6 inline-flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-200">
+            <Shield className="h-4 w-4" />
+            Browser-first security assessment
           </div>
-          <h1 className="text-2xl font-bold text-white">SSS Platform</h1>
-          <p className="text-sm text-gray-500 mt-1">Smart Security Scanner</p>
-        </div>
+          <h1 className="max-w-2xl text-4xl font-semibold leading-tight text-white">SSS Platform</h1>
+          <p className="mt-4 max-w-xl text-base leading-7 text-slate-400">
+            Collect browser-accessible web resources and API flows, review deterministic findings, and export reports for security assessment workflows.
+          </p>
+          <div className="mt-8 grid max-w-xl gap-3">
+            {[
+              "DOM XSS, storage, postMessage, source map, API endpoint, and secret candidates",
+              "Authenticated crawling with browser login, cookies, or bearer tokens",
+              "HTML, Markdown, and JSON reports with PoC and reproduction steps",
+            ].map((item) => (
+              <div key={item} className="flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-900/70 p-4">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-300" />
+                <p className="text-sm leading-6 text-slate-300">{item}</p>
+              </div>
+            ))}
+          </div>
+        </section>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8">
-          <h2 className="text-lg font-semibold text-white mb-6">
-            {mode === "login" ? "Sign in" : "Create account"}
-          </h2>
-          <form onSubmit={submit} className="space-y-4">
-            {mode === "register" && (
-              <input
-                type="text"
-                placeholder="Full name"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                required
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500"
-              />
+        <div className="mx-auto w-full max-w-md">
+          <div className="mb-6 text-center lg:hidden">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10">
+              <Shield className="h-6 w-6 text-emerald-300" />
+            </div>
+            <h1 className="text-2xl font-semibold text-white">SSS Platform</h1>
+            <p className="mt-1 text-sm text-slate-500">Browser-first security assessment</p>
+          </div>
+
+          <Card className="p-6 sm:p-8">
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold text-white">{mode === "login" ? "Sign in" : "Create account"}</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {mode === "login" ? "Continue to your assessment workspace." : "Create a workspace account to start scans."}
+              </p>
+            </div>
+
+            {error && (
+              <div className="mb-4 flex gap-2 rounded-lg border border-red-900/70 bg-red-950/40 p-3 text-sm text-red-200">
+                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                <span>{error}</span>
+              </div>
             )}
-            <input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500"
-            />
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500"
-            />
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-900 text-black font-semibold rounded-lg py-2.5 text-sm transition-colors"
-            >
-              {loading ? "Loading..." : mode === "login" ? "Sign in" : "Create account"}
-            </button>
+
+            <form onSubmit={submit} className="space-y-4">
+            {mode === "register" && (
+              <Field label="Full name">
+                <TextInput type="text" placeholder="Security Analyst" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+              </Field>
+            )}
+            <Field label="Email">
+              <TextInput type="email" placeholder="analyst@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            </Field>
+            <Field label="Password" hint={mode === "register" ? "Use at least 8 characters." : undefined}>
+              <TextInput type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} />
+            </Field>
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+              {mode === "login" ? "Sign in" : "Create account"}
+            </Button>
           </form>
-          <p className="text-center text-sm text-gray-500 mt-4">
+          <p className="mt-5 text-center text-sm text-slate-500">
             {mode === "login" ? "No account? " : "Have an account? "}
             <button
-              className="text-emerald-400 hover:underline"
-              onClick={() => setMode(mode === "login" ? "register" : "login")}
+              className="font-semibold text-emerald-300 hover:text-emerald-200"
+              onClick={() => {
+                setError("");
+                setMode(mode === "login" ? "register" : "login");
+              }}
             >
               {mode === "login" ? "Register" : "Sign in"}
             </button>
           </p>
+        </Card>
         </div>
       </div>
     </div>
