@@ -74,6 +74,12 @@ docker compose build
 docker compose up -d
 ```
 
+기본 개발값은 `docker-compose.yml`에 포함되어 있어 로컬 데모는 `.env` 없이도 실행할 수 있습니다. 값을 명시적으로 관리하려면 다음처럼 예시 파일을 복사해 사용하세요.
+
+```bash
+cp .env.example .env
+```
+
 접속:
 
 - Web UI: `http://localhost`
@@ -114,7 +120,7 @@ docker compose down -v
 | `FERNET_KEY` | dev 기본값 제공 | 세션 데이터 암호화 키 |
 | `ENVIRONMENT` | `development` | 실행 환경 |
 | `SCAN_DATA_PATH` | `/data/scans` | 수집 리소스와 보고서 저장 경로 |
-| `SSRF_ALLOWED_HOSTS` | `vulnerable-site,host.docker.internal` | development/e2e/test에서만 허용되는 테스트 host |
+| `SSRF_ALLOWED_HOSTS` | Compose 기본값: `vulnerable-site,host.docker.internal` | development/e2e/test에서만 허용되는 테스트 host |
 | `ALLOW_PRIVATE_TARGETS` | `false` | 기본값은 private target 차단 |
 | `ANTHROPIC_API_KEY` | empty | AI round2 분석용 선택 값 |
 
@@ -266,6 +272,8 @@ docker compose config
 docker compose build
 docker compose --profile e2e up -d
 ```
+
+`make test`도 제공되지만, 로컬 환경에 따라 `python` 명령이 없을 수 있습니다. 그 경우 위의 `.venv/bin/python -m pytest tests/ -v` 명령을 사용하세요.
 
 ## API Overview
 
