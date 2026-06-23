@@ -91,12 +91,12 @@ export function Projects() {
           icon={<FolderOpen className="h-10 w-10" />}
           title="No projects yet"
           description="Create a project first, then start a scan from that scope."
-          action={
+          action={!showNew ? (
             <Button onClick={() => setShowNew(true)}>
               <Plus className="h-4 w-4" />
               Create project
             </Button>
-          }
+          ) : undefined}
         />
       ) : (
         <div className="grid gap-3">

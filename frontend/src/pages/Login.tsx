@@ -23,6 +23,7 @@ export function Login() {
         const data = await login(email, password);
         localStorage.setItem("access_token", data.access_token);
         localStorage.setItem("refresh_token", data.refresh_token);
+        toast.dismiss();
         navigate("/");
       } else {
         await register(email, password, fullName);
