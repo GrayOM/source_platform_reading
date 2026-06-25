@@ -1,14 +1,15 @@
 import uuid
 from typing import Annotated
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import case, select
+from sqlalchemy import case, or_, select
 
 from app.api.deps import DB, CurrentUser
-from app.models.finding import Finding, Severity
+from app.models.finding import Finding, Severity, TriageStatus
 from app.models.project import Project
 from app.models.scan import Scan
-from app.schemas.finding import FindingOut, FindingUpdate
+from app.schemas.finding import FindingOut, FindingTriageUpdate, FindingUpdate
 
 router = APIRouter(prefix="/findings", tags=["findings"])
 
@@ -19,6 +20,11 @@ async def list_findings(
     db: DB,
     scan_id: Annotated[uuid.UUID | None, Query()] = None,
     severity: Annotated[Severity | None, Query()] = None,
+    triage_status: Annotated[TriageStatus | None, Query()] = None,
+    only_new: Annotated[bool, Query()] = False,
+    recurring: Annotated[bool, Query()] = False,
+    previously_verified: Annotated[bool, Query()] = False,
+    previously_false_positive: Annotated[bool, Query()] = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[Finding]:
@@ -32,6 +38,16 @@ async def list_findings(
         q = q.where(Finding.scan_id == scan_id)
     if severity:
         q = q.where(Finding.severity == severity)
+    if triage_status:
+        q = q.where(Finding.triage_status == triage_status)
+    if only_new:
+        q = q.where(Finding.duplicate_of_finding_id.is_(None), Finding.recurrence_count <= 1)
+    if recurring:
+        q = q.where(or_(Finding.duplicate_of_finding_id.is_not(None), Finding.recurrence_count > 1))
+    if previously_verified:
+        q = q.where(Finding.evidence["previously_verified"].as_boolean().is_(True))
+    if previously_false_positive:
+        q = q.where(Finding.evidence["previously_marked_false_positive"].as_boolean().is_(True))
     severity_rank = case(
         (Finding.severity == Severity.CRITICAL, 0),
         (Finding.severity == Severity.HIGH, 1),
@@ -64,4 +80,25 @@ async def update_finding(finding_id: uuid.UUID, payload: FindingUpdate, current_
     finding = await get_finding(finding_id, current_user, db)
     for field, value in payload.model_dump(exclude_none=True).items():
         setattr(finding, field, value)
+    return finding
+
+
+@router.patch("/{finding_id}/triage", response_model=FindingOut)
+async def update_finding_triage(
+    finding_id: uuid.UUID,
+    payload: FindingTriageUpdate,
+    current_user: CurrentUser,
+    db: DB,
+) -> Finding:
+    finding = await get_finding(finding_id, current_user, db)
+    finding.triage_status = payload.triage_status
+    finding.analyst_note = payload.analyst_note
+    finding.verification_note = payload.verification_note
+    finding.remediation_status = payload.remediation_status
+    finding.reviewed_at = datetime.now(timezone.utc)
+    finding.reviewed_by = current_user.id
+    if payload.triage_status == TriageStatus.FIXED:
+        finding.fixed_at = finding.fixed_at or finding.reviewed_at
+    elif payload.triage_status != TriageStatus.FIXED:
+        finding.fixed_at = None
     return finding

@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     allow_private_targets: bool = False
     ssrf_allowed_hosts: str = ""
 
+    # Browser auth
+    browser_auth_mode: str = "manual"
+    e2e_browser_auth_enabled: bool = False
+    e2e_browser_auth_allowed_hosts: str = "vulnerable-site,localhost,127.0.0.1"
+    e2e_browser_auth_email: str = "demo@example.com"
+    e2e_browser_auth_password: str = "password123!"
+
     # AI
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
@@ -54,6 +61,10 @@ class Settings(BaseSettings):
     @property
     def ssrf_allowed_hosts_list(self) -> list[str]:
         return [h.strip().lower() for h in self.ssrf_allowed_hosts.split(",") if h.strip()]
+
+    @property
+    def e2e_browser_auth_allowed_hosts_list(self) -> list[str]:
+        return [h.strip().lower() for h in self.e2e_browser_auth_allowed_hosts.split(",") if h.strip()]
 
     @property
     def max_resource_size_bytes(self) -> int:

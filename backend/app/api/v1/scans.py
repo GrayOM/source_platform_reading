@@ -11,6 +11,7 @@ from app.core.security import validate_target_url
 from app.models.project import Project
 from app.models.scan import AuthMethod, Scan, ScanSession, ScanStatus
 from app.schemas.scan import AuthConfig, ScanCreate, ScanOut
+from app.services.scan_diff import build_cross_scan_diff, normalized_origin, scan_auth_method
 from app.workers.scan_worker import orchestrate_scan
 
 router = APIRouter(prefix="/scans", tags=["scans"])
@@ -58,9 +59,14 @@ async def create_scan(payload: ScanCreate, current_user: CurrentUser, db: DB) ->
     if payload.auth.method == AuthMethod.BROWSER:
         scan.status = ScanStatus.PENDING
         scan.celery_task_id = None
+        await db.commit()
+        await db.refresh(scan)
     else:
+        await db.commit()
         task = orchestrate_scan.delay(str(scan.id))
         scan.celery_task_id = task.id
+        await db.commit()
+        await db.refresh(scan)
     return scan
 
 
@@ -106,9 +112,83 @@ async def list_scans(
     return list(result.scalars().all())
 
 
+@router.post("/compare")
+async def compare_scans(payload: dict, current_user: CurrentUser, db: DB) -> dict:
+    try:
+        base_scan_id = uuid.UUID(str(payload.get("base_scan_id") or payload.get("scan_id")))
+        compare_scan_id = uuid.UUID(str(payload.get("compare_scan_id")))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="base_scan_id and compare_scan_id are required UUIDs",
+        )
+
+    result = await db.execute(
+        select(Scan)
+        .join(Project)
+        .where(Scan.id.in_([base_scan_id, compare_scan_id]), Project.user_id == current_user.id)
+        .options(selectinload(Scan.session), selectinload(Scan.resources), selectinload(Scan.findings))
+    )
+    scans = {scan.id: scan for scan in result.scalars().all()}
+    base_scan = scans.get(base_scan_id)
+    compare_scan = scans.get(compare_scan_id)
+    if not base_scan or not compare_scan:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Both scans must exist and belong to the current user",
+        )
+    if base_scan.project_id != compare_scan.project_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Scans must belong to the same project",
+        )
+    if normalized_origin(base_scan.target_url) != normalized_origin(compare_scan.target_url):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Scans must have the same normalized target origin",
+        )
+    if base_scan.status != ScanStatus.COMPLETED or compare_scan.status != ScanStatus.COMPLETED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Both scans must be completed")
+
+    return build_cross_scan_diff(base_scan, compare_scan)
+
+
 @router.get("/{scan_id}", response_model=ScanOut)
 async def get_scan(scan_id: uuid.UUID, current_user: CurrentUser, db: DB) -> Scan:
     return await _get_scan_or_404(scan_id, current_user, db)
+
+
+@router.get("/{scan_id}/diff-candidates")
+async def diff_candidates(scan_id: uuid.UUID, current_user: CurrentUser, db: DB) -> list[dict]:
+    scan = await _get_scan_or_404(scan_id, current_user, db)
+    result = await db.execute(
+        select(Scan)
+        .join(Project)
+        .where(
+            Project.user_id == current_user.id,
+            Scan.project_id == scan.project_id,
+            Scan.id != scan.id,
+            Scan.status == ScanStatus.COMPLETED,
+        )
+        .options(selectinload(Scan.session))
+        .order_by(Scan.created_at.desc())
+    )
+    origin = normalized_origin(scan.target_url)
+    candidates = [
+        candidate for candidate in result.scalars().all()
+        if normalized_origin(candidate.target_url) == origin
+    ]
+    return [
+        {
+            "id": str(candidate.id),
+            "target_url": candidate.target_url,
+            "status": candidate.status.value,
+            "auth_method": scan_auth_method(candidate),
+            "created_at": candidate.created_at,
+            "completed_at": candidate.completed_at,
+        }
+        for candidate in candidates
+    ]
 
 
 @router.post("/{scan_id}/cancel")
@@ -133,7 +213,9 @@ async def start_browser_auth(scan_id: uuid.UUID, current_user: CurrentUser, db: 
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Scan not in pending state")
 
     from app.workers.scan_worker import run_browser_auth
+    scan.status = ScanStatus.AUTHENTICATING
+    await db.commit()
     task = run_browser_auth.delay(str(scan_id))
     scan.celery_task_id = task.id
-    scan.status = ScanStatus.AUTHENTICATING
+    await db.commit()
     return {"task_id": task.id, "detail": "Browser auth session started"}

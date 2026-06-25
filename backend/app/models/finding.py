@@ -25,6 +25,15 @@ class FindingStatus(str, enum.Enum):
     ACCEPTED = "accepted"
 
 
+class TriageStatus(str, enum.Enum):
+    CANDIDATE = "candidate"
+    VERIFIED = "verified"
+    FALSE_POSITIVE = "false_positive"
+    ACCEPTED_RISK = "accepted_risk"
+    FIXED = "fixed"
+    NEEDS_REVIEW = "needs_review"
+
+
 class VulnType(str, enum.Enum):
     XSS = "xss"
     SQLI = "sql_injection"
@@ -71,10 +80,39 @@ class Finding(Base):
     status: Mapped[FindingStatus] = mapped_column(
         Enum(FindingStatus), default=FindingStatus.NEW, nullable=False, index=True
     )
+    triage_status: Mapped[TriageStatus] = mapped_column(
+        Enum(TriageStatus), default=TriageStatus.CANDIDATE, nullable=False, index=True
+    )
     analyst_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verification_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    fixed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    remediation_status: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    duplicate_of_finding_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id"), nullable=True)
+    recurrence_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
     scan: Mapped["Scan"] = relationship("Scan", back_populates="findings")
     resource: Mapped["Resource | None"] = relationship("Resource", back_populates="findings")
+
+    @property
+    def previous_triage_status(self) -> str | None:
+        return (self.evidence or {}).get("previous_triage_status")
+
+    @property
+    def previous_finding_id(self) -> str | None:
+        return (self.evidence or {}).get("previous_finding_id")
+
+    @property
+    def previously_verified(self) -> bool:
+        return bool((self.evidence or {}).get("previously_verified"))
+
+    @property
+    def previously_marked_false_positive(self) -> bool:
+        return bool((self.evidence or {}).get("previously_marked_false_positive"))

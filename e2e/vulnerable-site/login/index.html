@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SSS E2E Login</title>
+  </head>
+  <body>
+    <h1>SSS E2E Login</h1>
+    <form id="login-form">
+      <label>
+        Email
+        <input name="email" type="email" value="demo@example.com" autocomplete="username" />
+      </label>
+      <label>
+        Password
+        <input name="password" type="password" value="password123!" autocomplete="current-password" />
+      </label>
+      <button type="submit">Login</button>
+    </form>
+    <nav>
+      <a href="/profile.html">Profile</a>
+      <a href="/redirect.html?next=https://example.com">Redirect Candidate</a>
+    </nav>
+    <script>
+      document.getElementById("login-form").addEventListener("submit", function (event) {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        if (data.get("email") !== "demo@example.com" || data.get("password") !== "password123!") {
+          document.body.dataset.auth = "failed";
+          return;
+        }
+        const token = "e2e-headless-browser-login-token";
+        localStorage.setItem("access_token", token);
+        sessionStorage.setItem("session_token", "e2e-headless-session-token");
+        document.cookie = "e2e_session=headless-login; path=/; SameSite=Lax";
+        fetch("/api/profile?include=roles", {
+          headers: { Authorization: "Bearer " + token },
+        }).catch(function () {});
+        document.body.dataset.auth = "ok";
+      });
+    </script>
+    <script src="/app.js"></script>
+  </body>
+</html>

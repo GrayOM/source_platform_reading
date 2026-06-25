@@ -12,13 +12,14 @@ settings = get_settings()
 
 
 @celery_app.task(bind=True, name="app.workers.report_worker.generate_report")
-def generate_report(self, report_id: str) -> dict:
+def generate_report(self, report_id: str, compare_scan_id: str | None = None) -> dict:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker, selectinload
     from app.models.report import Report
     from app.models.scan import Scan
     from app.models.finding import Finding
     from app.services.report.report_engine import ReportEngine
+    from app.services.scan_diff import build_cross_scan_diff
     from sqlalchemy import select
 
     sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
@@ -31,13 +32,30 @@ def generate_report(self, report_id: str) -> dict:
         if not report:
             return {"error": "Report not found"}
 
-        scan = db.get(Scan, report.scan_id)
+        scan = db.execute(
+            select(Scan)
+            .where(Scan.id == report.scan_id)
+            .options(selectinload(Scan.session), selectinload(Scan.resources), selectinload(Scan.findings))
+        ).scalar_one()
         findings = db.execute(
             select(Finding).where(Finding.scan_id == report.scan_id)
         ).scalars().all()
+        cross_scan_diff = None
+        if compare_scan_id:
+            compare_scan = db.execute(
+                select(Scan)
+                .where(Scan.id == uuid.UUID(compare_scan_id))
+                .options(selectinload(Scan.session), selectinload(Scan.resources), selectinload(Scan.findings))
+            ).scalar_one()
+            cross_scan_diff = build_cross_scan_diff(scan, compare_scan)
 
         output_dir = settings.scan_data_path / str(scan.id) / "reports"
-        engine_svc = ReportEngine(scan=scan, findings=list(findings), output_dir=output_dir)
+        engine_svc = ReportEngine(
+            scan=scan,
+            findings=list(findings),
+            output_dir=output_dir,
+            cross_scan_diff=cross_scan_diff,
+        )
         file_path = engine_svc.generate(report.format, report.report_type)
 
         report.file_path = str(file_path)

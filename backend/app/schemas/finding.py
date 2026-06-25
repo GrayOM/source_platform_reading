@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.finding import FindingStatus, Severity, VulnType
+from app.models.finding import FindingStatus, Severity, TriageStatus, VulnType
 
 
 class FindingCreate(BaseModel):
@@ -32,6 +32,13 @@ class FindingUpdate(BaseModel):
     severity: Severity | None = None
 
 
+class FindingTriageUpdate(BaseModel):
+    triage_status: TriageStatus
+    analyst_note: str | None = None
+    verification_note: str | None = None
+    remediation_status: str | None = Field(None, max_length=100)
+
+
 class FindingOut(BaseModel):
     id: uuid.UUID
     scan_id: uuid.UUID
@@ -53,7 +60,22 @@ class FindingOut(BaseModel):
     owasp_category: str | None
     recommendation: str
     status: FindingStatus
+    triage_status: TriageStatus
     analyst_note: str | None
+    verification_note: str | None
+    reviewed_at: datetime | None
+    reviewed_by: uuid.UUID | None
+    fixed_at: datetime | None
+    remediation_status: str | None
+    fingerprint: str | None
+    duplicate_of_finding_id: uuid.UUID | None
+    recurrence_count: int
+    first_seen_at: datetime | None
+    last_seen_at: datetime | None
+    previous_triage_status: str | None
+    previous_finding_id: str | None
+    previously_verified: bool
+    previously_marked_false_positive: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}

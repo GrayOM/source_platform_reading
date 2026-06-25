@@ -7,14 +7,21 @@ impersonate the authenticated session.
 """
 import asyncio
 import json
-import time
+import os
+import sys
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from playwright.async_api import BrowserContext, Page, async_playwright
 
 from app.core.config import get_settings
 
 settings = get_settings()
+
+HEADED_BROWSER_ERROR = (
+    "Headed browser requires DISPLAY/XServer. "
+    "Use headless E2E mode only for allowed test targets."
+)
 
 
 @dataclass
@@ -26,13 +33,103 @@ class CapturedSession:
 
 
 async def run_browser_auth_session(target_url: str, timeout_seconds: int = 300) -> CapturedSession:
+    current_settings = get_settings()
+    if _should_use_e2e_auto_login(target_url, current_settings):
+        return await run_e2e_auto_login_session(target_url, current_settings)
+    if current_settings.browser_auth_mode.lower() == "e2e":
+        raise RuntimeError("E2E browser auth auto-login is not allowed for this target")
+    return await run_manual_browser_auth_session(target_url, timeout_seconds)
+
+
+def _should_use_e2e_auto_login(target_url: str, current_settings=None) -> bool:
+    current_settings = current_settings or get_settings()
+    if not current_settings.e2e_browser_auth_enabled:
+        return False
+    if current_settings.environment not in ("development", "e2e", "test"):
+        return False
+    return _target_host_allowed(target_url, current_settings.e2e_browser_auth_allowed_hosts_list)
+
+
+def _target_host_allowed(target_url: str, allowed_hosts: list[str]) -> bool:
+    parsed = urlparse(target_url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    return bool(host) and host in {allowed.lower().rstrip(".") for allowed in allowed_hosts}
+
+
+async def run_e2e_auto_login_session(target_url: str, current_settings=None) -> CapturedSession:
+    """Headless E2E-only login flow for explicitly allowed test hosts."""
+    current_settings = current_settings or get_settings()
+    if current_settings.environment not in ("development", "e2e", "test"):
+        raise RuntimeError("E2E browser auth is only allowed in development, e2e, or test environments")
+    if not _target_host_allowed(target_url, current_settings.e2e_browser_auth_allowed_hosts_list):
+        raise RuntimeError("E2E browser auth target is not in the allowed host list")
+
+    captured_headers: dict[str, str] = {}
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+        )
+        context: BrowserContext = await browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            ignore_https_errors=True,
+        )
+
+        async def on_request(request):
+            auth = request.headers.get("authorization")
+            if auth:
+                captured_headers["Authorization"] = auth
+
+        context.on("request", on_request)
+
+        page: Page = await context.new_page()
+        await page.goto(target_url, wait_until="domcontentloaded")
+        email = current_settings.e2e_browser_auth_email
+        password = current_settings.e2e_browser_auth_password
+
+        email_selector = "input[type=email], input[name=email], input#email"
+        password_selector = "input[type=password], input[name=password], input#password"
+        if await page.locator(email_selector).count():
+            await page.locator(email_selector).first.fill(email)
+        if await page.locator(password_selector).count():
+            await page.locator(password_selector).first.fill(password)
+        if await page.locator("button[type=submit], button").count():
+            await page.locator("button[type=submit], button").first.click()
+            await page.wait_for_timeout(750)
+
+        cookies = await context.cookies()
+        local_storage = await page.evaluate(
+            "() => Object.fromEntries(Object.entries(localStorage))"
+        )
+        session_storage = await page.evaluate(
+            "() => Object.fromEntries(Object.entries(sessionStorage))"
+        )
+        await browser.close()
+
+    return CapturedSession(
+        cookies=cookies,
+        local_storage=local_storage or {},
+        session_storage=session_storage or {},
+        extra_headers=captured_headers,
+    )
+
+
+async def run_manual_browser_auth_session(target_url: str, timeout_seconds: int = 300) -> CapturedSession:
     """
     Opens a headed Chromium window pointed at target_url.
     Waits for the user to authenticate, then captures the session.
     Returns when the user closes the browser or timeout is reached.
     """
+    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+        raise RuntimeError(HEADED_BROWSER_ERROR)
+
     captured_headers: dict[str, str] = {}
-    session_done = asyncio.Event()
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(

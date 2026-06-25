@@ -88,6 +88,9 @@ class PlaywrightCrawler:
         self.failed_urls: list[dict] = []
         self.sitemap_builder = SitemapBuilder()
         self.semaphore: asyncio.Semaphore | None = None
+        self.authenticated_context = bool(
+            session and getattr(getattr(session, "auth_method", None), "value", "none") != "none"
+        )
 
     def _is_in_scope(self, url: str) -> bool:
         parsed = urllib.parse.urlparse(url)
@@ -191,6 +194,7 @@ class PlaywrightCrawler:
                                 url=req_url,
                                 resource_type=rtype,
                                 discovered_on_page=url,
+                                metadata=self._resource_metadata(),
                             )
 
                     await route.continue_()
@@ -213,7 +217,7 @@ class PlaywrightCrawler:
                             resource_type=ResourceType.HTML,
                             http_status=status,
                             discovered_on_page=parent,
-                            metadata={"page": True, "requested_url": url},
+                            metadata=self._resource_metadata(page=True, requested_url=url),
                         )
 
                 if self.screenshot:
@@ -277,7 +281,7 @@ class PlaywrightCrawler:
                     url=url,
                     resource_type=ResourceType.OTHER,
                     discovered_on_page=parent,
-                    metadata={"failed": True, "error": str(exc)},
+                    metadata=self._resource_metadata(failed=True, error=str(exc)),
                 )
 
     async def _download_resource(self, url: str, discovered_on: str) -> None:
@@ -333,6 +337,7 @@ class PlaywrightCrawler:
                     is_minified=is_minified,
                     source_map_url=source_map_url,
                     discovered_on_page=discovered_on,
+                    metadata=self._resource_metadata(),
                 )
 
                 # Automatically queue source maps for download
@@ -341,6 +346,13 @@ class PlaywrightCrawler:
 
         except Exception as exc:
             log.warning("crawl.download_failed", url=url, error=str(exc))
+
+    def _resource_metadata(self, **extra) -> dict:
+        metadata = dict(extra)
+        if self.authenticated_context:
+            metadata["auth_context"] = "authenticated"
+            metadata["discovered_after_login"] = True
+        return metadata
 
 
 def _url_to_filename(url: str) -> str:

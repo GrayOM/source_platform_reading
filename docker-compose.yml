@@ -93,6 +93,11 @@ services:
       ALLOW_PRIVATE_TARGETS: ${ALLOW_PRIVATE_TARGETS:-false}
       RUN_MIGRATIONS: "false"
       SSRF_ALLOWED_HOSTS: ${SSRF_ALLOWED_HOSTS:-vulnerable-site,host.docker.internal}
+      BROWSER_AUTH_MODE: ${BROWSER_AUTH_MODE:-manual}
+      E2E_BROWSER_AUTH_ENABLED: ${E2E_BROWSER_AUTH_ENABLED:-true}
+      E2E_BROWSER_AUTH_ALLOWED_HOSTS: ${E2E_BROWSER_AUTH_ALLOWED_HOSTS:-vulnerable-site,localhost,127.0.0.1}
+      E2E_BROWSER_AUTH_EMAIL: ${E2E_BROWSER_AUTH_EMAIL:-demo@example.com}
+      E2E_BROWSER_AUTH_PASSWORD: ${E2E_BROWSER_AUTH_PASSWORD:-password123!}
     volumes:
       - scan_data:/data/scans
     shm_size: 2gb

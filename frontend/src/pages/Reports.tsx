@@ -5,7 +5,7 @@ import { useState } from "react";
 import toast from "react-hot-toast";
 import { useParams } from "react-router-dom";
 import { Badge, Button, Card, EmptyState, PageHeader, PageShell, Select } from "../components/ui";
-import { downloadReport, generateReport, getScanReports } from "../lib/api";
+import { downloadReport, generateReport, getDiffCandidates, getScanReports } from "../lib/api";
 
 const FORMATS = [
   { value: "html", label: "HTML", desc: "Browser-friendly report" },
@@ -28,6 +28,7 @@ export function Reports() {
   const qc = useQueryClient();
   const [format, setFormat] = useState<string>("html");
   const [type, setType] = useState<string>("full");
+  const [compareScanId, setCompareScanId] = useState<string>("");
   const [downloadingId, setDownloadingId] = useState<string>("");
 
   const { data: reports = [], isLoading } = useQuery({
@@ -39,8 +40,14 @@ export function Reports() {
     },
   });
 
+  const { data: diffCandidates = [] } = useQuery({
+    queryKey: ["diff-candidates", scanId],
+    queryFn: () => getDiffCandidates(scanId!),
+    enabled: Boolean(scanId),
+  });
+
   const generateMutation = useMutation({
-    mutationFn: () => generateReport(scanId!, format, type),
+    mutationFn: () => generateReport(scanId!, format, type, compareScanId || undefined),
     onSuccess: () => {
       toast.success("Report generation started");
       qc.invalidateQueries({ queryKey: ["reports", scanId] });
@@ -102,6 +109,19 @@ export function Reports() {
                 <Info className="mt-0.5 h-4 w-4 flex-shrink-0" />
                 PDF is experimental. If PDF rendering fails, the generated report downloads as HTML.
               </div>
+            )}
+            {diffCandidates.length > 0 && (
+              <label>
+                <span className="mb-2 block text-sm font-medium text-slate-300">Compare scan</span>
+                <Select value={compareScanId} onChange={(e) => setCompareScanId(e.target.value)}>
+                  <option value="">No cross-scan diff</option>
+                  {diffCandidates.map((candidate: any) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.auth_method} · {candidate.id.slice(0, 8)}
+                    </option>
+                  ))}
+                </Select>
+              </label>
             )}
             <Button onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending}>
               {generateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}

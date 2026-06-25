@@ -9,6 +9,7 @@ from app.models.report import ReportFormat, ReportType
 class ReportRequest(BaseModel):
     format: ReportFormat = ReportFormat.PDF
     report_type: ReportType = ReportType.FULL
+    compare_scan_id: uuid.UUID | None = None
 
 
 class ReportOut(BaseModel):

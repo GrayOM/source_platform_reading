@@ -54,18 +54,37 @@ export const createScan = (data: object) => api.post("/scans", data).then((r) =>
 export const cancelScan = (id: string) => api.post(`/scans/${id}/cancel`);
 export const startBrowserAuth = (id: string) =>
   api.post(`/scans/${id}/browser-auth/start`).then((r) => r.data);
+export const getDiffCandidates = (scan_id: string) =>
+  api.get(`/scans/${scan_id}/diff-candidates`).then((r) => r.data);
+export const compareScans = (base_scan_id: string, compare_scan_id: string) =>
+  api.post("/scans/compare", { base_scan_id, compare_scan_id }).then((r) => r.data);
 
 // Findings
-export const getFindings = (scan_id?: string, severity?: string) =>
-  api.get("/findings", { params: { scan_id, severity, limit: 200 } }).then((r) => r.data);
+export const getFindings = (scan_id?: string, severity?: string, triage_status?: string, recurrence_filter?: string) =>
+  api
+    .get("/findings", {
+      params: {
+        scan_id,
+        severity,
+        triage_status,
+        only_new: recurrence_filter === "only_new" || undefined,
+        recurring: recurrence_filter === "recurring" || undefined,
+        previously_verified: recurrence_filter === "previously_verified" || undefined,
+        previously_false_positive: recurrence_filter === "previously_false_positive" || undefined,
+        limit: 200,
+      },
+    })
+    .then((r) => r.data);
 export const updateFinding = (id: string, data: object) =>
   api.patch(`/findings/${id}`, data).then((r) => r.data);
+export const updateFindingTriage = (id: string, data: object) =>
+  api.patch(`/findings/${id}/triage`, data).then((r) => r.data);
 
 // Reports
 export const getScanReports = (scan_id: string) =>
   api.get(`/reports/scans/${scan_id}`).then((r) => r.data);
-export const generateReport = (scan_id: string, format: string, report_type: string) =>
-  api.post(`/reports/scans/${scan_id}/generate`, { format, report_type }).then((r) => r.data);
+export const generateReport = (scan_id: string, format: string, report_type: string, compare_scan_id?: string) =>
+  api.post(`/reports/scans/${scan_id}/generate`, { format, report_type, compare_scan_id }).then((r) => r.data);
 export const downloadReport = async (report_id: string) => {
   const response = await api.get(`/reports/${report_id}/download`, { responseType: "blob" });
   const disposition = response.headers["content-disposition"] ?? "";

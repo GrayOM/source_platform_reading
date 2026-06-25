@@ -7,13 +7,16 @@ Runs agents in two rounds:
 import asyncio
 import uuid
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.finding import Finding, Severity, VulnType
+from app.models.finding import Finding, Severity, TriageStatus, VulnType
 from app.models.resource import Resource
+from app.models.scan import Scan
 from app.schemas.finding import FindingCreate
 from app.services.analysis.agents.api_mapper import APIMapperAgent
 from app.services.analysis.agents.auth_analyzer import AuthAnalyzerAgent
@@ -21,6 +24,8 @@ from app.services.analysis.agents.base_agent import AI_SKIP_MESSAGE, AIAnalysisS
 from app.services.analysis.agents.business_logic_analyzer import BusinessLogicAgent
 from app.services.analysis.agents.js_analyzer import JSAnalyzerAgent
 from app.services.analysis.agents.secret_detector import SecretDetectorAgent
+from app.services.finding_fingerprint import generate_finding_fingerprint
+from app.services.scan_diff import normalized_origin
 
 log = structlog.get_logger()
 
@@ -137,12 +142,81 @@ class AnalysisOrchestrator:
         if not findings:
             return []
         saved = []
+        deduped: dict[str, FindingCreate] = {}
         for fc in findings:
+            fingerprint = generate_finding_fingerprint(fc)
+            if fingerprint not in deduped:
+                deduped[fingerprint] = fc
+
+        scan = await self.db.get(Scan, uuid.UUID(self.scan_id))
+        project_id = scan.project_id if scan else None
+        target_origin = normalized_origin(self.target_url)
+        now = datetime.now(timezone.utc)
+
+        for fingerprint, fc in deduped.items():
+            previous = await self._previous_finding(fingerprint, project_id, target_origin)
+            evidence = dict(fc.evidence or {})
+            duplicate_of_finding_id = None
+            recurrence_count = 1
+            first_seen_at = now
+            if previous:
+                duplicate_of_finding_id = previous.duplicate_of_finding_id or previous.id
+                recurrence_count = max(2, (previous.recurrence_count or 1) + 1)
+                first_seen_at = previous.first_seen_at or previous.created_at or now
+                previous_triage = getattr(previous.triage_status, "value", str(previous.triage_status or "candidate"))
+                evidence.update(
+                    {
+                        "previous_triage_status": previous_triage,
+                        "previous_finding_id": str(previous.id),
+                        "recurring": True,
+                        "verification_required": previous_triage not in {TriageStatus.VERIFIED.value},
+                    }
+                )
+                if previous_triage == TriageStatus.FALSE_POSITIVE.value:
+                    evidence.update(
+                        {
+                            "previously_marked_false_positive": True,
+                            "verification_required": True,
+                        }
+                    )
+                if previous_triage == TriageStatus.VERIFIED.value:
+                    evidence.update(
+                        {
+                            "previously_verified": True,
+                            "verification_required": False,
+                        }
+                    )
+                previous.recurrence_count = max(previous.recurrence_count or 1, recurrence_count)
+                previous.last_seen_at = now
+
             finding = Finding(
                 scan_id=uuid.UUID(self.scan_id),
-                **fc.model_dump(),
+                **fc.model_copy(update={"evidence": evidence}).model_dump(),
+                fingerprint=fingerprint,
+                duplicate_of_finding_id=duplicate_of_finding_id,
+                recurrence_count=recurrence_count,
+                first_seen_at=first_seen_at,
+                last_seen_at=now,
             )
             self.db.add(finding)
             saved.append(finding)
         await self.db.flush()
         return saved
+
+    async def _previous_finding(self, fingerprint: str, project_id: uuid.UUID | None, target_origin: str) -> Finding | None:
+        if not project_id:
+            return None
+        result = await self.db.execute(
+            select(Finding, Scan.target_url)
+            .join(Scan, Scan.id == Finding.scan_id)
+            .where(
+                Finding.fingerprint == fingerprint,
+                Finding.scan_id != uuid.UUID(self.scan_id),
+                Scan.project_id == project_id,
+            )
+            .order_by(Finding.first_seen_at.asc().nulls_last(), Finding.created_at.asc())
+        )
+        for finding, target_url in result.all():
+            if normalized_origin(target_url) == target_origin:
+                return finding
+        return None

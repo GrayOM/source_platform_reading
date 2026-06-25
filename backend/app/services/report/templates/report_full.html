@@ -40,6 +40,16 @@
   table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
   th { background: #f6f8fa; text-align: left; padding: 10px 12px; border-bottom: 2px solid #e1e4e8; }
   td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+  .delta-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 16px 0; }
+  .delta-card { border: 1px solid #e1e4e8; border-radius: 8px; padding: 14px; background: #f6f8fa; }
+  .delta-card .number { font-size: 1.5rem; font-weight: 700; color: #0d1117; }
+  .delta-card .label { color: #6e7781; font-size: 0.78rem; }
+  .url-list code, .wrap-url { overflow-wrap: anywhere; word-break: break-word; }
+  .hint-badge { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; border-radius: 999px; background: #fff4d6; color: #5f4300; font-size: 0.72rem; font-weight: 700; }
+  .soft-badge { display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 999px; background: #e7f0ff; color: #0b4b9c; font-size: 0.72rem; font-weight: 700; }
+  .triage-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; background: #eef2ff; color: #3730a3; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; }
+  .verified-callout { border: 1px solid #86efac; background: #f0fdf4; border-radius: 8px; padding: 14px 18px; margin: 12px 0; }
+  .false-positive { border-color: #cbd5e1; background: #f8fafc; }
   .footer { text-align: center; padding: 40px; color: #8b949e; font-size: 0.8rem; border-top: 1px solid #e1e4e8; margin-top: 60px; }
   @media print { .cover { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 </style>
@@ -83,7 +93,44 @@
     <tr><th>Collected Pages</th><td>{{ pages | length }}</td></tr>
     <tr><th>Collected Resources</th><td>{{ resources | length }}</td></tr>
     <tr><th>Findings</th><td>{{ findings_count }}</td></tr>
+    <tr><th>Verified Findings</th><td>{{ triage_counts.verified }}</td></tr>
+    <tr><th>Candidate Findings</th><td>{{ triage_counts.candidate }}</td></tr>
+    <tr><th>New Findings</th><td>{{ recurrence_counts.new_findings_count }}</td></tr>
+    <tr><th>Recurring Findings</th><td>{{ recurrence_counts.recurring_findings_count }}</td></tr>
   </table>
+
+  <h2>Triage Summary</h2>
+  <table>
+    <tr><th>Status</th><th>Count</th></tr>
+    <tr><td>Verified</td><td>{{ triage_counts.verified }}</td></tr>
+    <tr><td>Candidate</td><td>{{ triage_counts.candidate }}</td></tr>
+    <tr><td>Needs Review</td><td>{{ triage_counts.needs_review }}</td></tr>
+    <tr><td>False Positive</td><td>{{ triage_counts.false_positive }}</td></tr>
+    <tr><td>Accepted Risk</td><td>{{ triage_counts.accepted_risk }}</td></tr>
+    <tr><td>Fixed</td><td>{{ triage_counts.fixed }}</td></tr>
+  </table>
+
+  <h2>Recurrence Summary</h2>
+  <table>
+    <tr><th>Status</th><th>Count</th></tr>
+    <tr><td>New</td><td>{{ recurrence_counts.new_findings_count }}</td></tr>
+    <tr><td>Recurring</td><td>{{ recurrence_counts.recurring_findings_count }}</td></tr>
+    <tr><td>Previously Verified</td><td>{{ recurrence_counts.previously_verified_count }}</td></tr>
+    <tr><td>Previously False Positive</td><td>{{ recurrence_counts.previously_false_positive_count }}</td></tr>
+  </table>
+
+  {% if verified_findings %}
+  <h2>Verified Findings</h2>
+  <p>These findings were manually verified by an analyst and should be prioritized in remediation planning.</p>
+  {% for finding in verified_findings[:10] %}
+  <div class="verified-callout">
+    <strong>{{ finding.title }}</strong>
+    <span class="badge badge-{{ finding.severity.value }}">{{ finding.severity.value }}</span>
+    {% if finding.evidence and finding.evidence.previously_verified %}<span class="soft-badge">recurring verified</span>{% endif %}
+    {% if finding.affected_url %}<div class="wrap-url"><code>{{ finding.affected_url }}</code></div>{% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
 
   <h2>Collection Results</h2>
   <h3>Pages</h3>
@@ -103,8 +150,90 @@
     {% for sm in source_maps[:50] %}<li><code>{{ sm.url }}</code></li>{% else %}<li>No source maps recorded.</li>{% endfor %}
   </ul>
 
-  <h2>Findings ({{ findings_count }} total)</h2>
-  {% for finding in findings %}
+  <h2>Cross-scan Auth Delta</h2>
+  {% if cross_scan_diff.included %}
+  <p>
+    This section compares two completed scans with the same project and normalized origin.
+    It highlights authenticated attack surface expansion candidates and does not confirm authorization bypass.
+    Manual verification is required.
+  </p>
+  <table>
+    <tr><th>Base scan</th><td><code>{{ cross_scan_diff.base_scan_id }}</code></td></tr>
+    <tr><th>Compare scan</th><td><code>{{ cross_scan_diff.compare_scan_id }}</code></td></tr>
+    <tr><th>Target URL</th><td class="wrap-url"><code>{{ cross_scan_diff.target_url }}</code></td></tr>
+    <tr><th>Auth method comparison</th><td>{{ cross_scan_diff.base_auth_method }} vs {{ cross_scan_diff.compare_auth_method }}</td></tr>
+  </table>
+
+  <div class="delta-grid">
+    <div class="delta-card"><div class="number">{{ cross_scan_diff.new_pages_count }}</div><div class="label">New pages</div></div>
+    <div class="delta-card"><div class="number">{{ cross_scan_diff.new_resources_count }}</div><div class="label">New resources</div></div>
+    <div class="delta-card"><div class="number">{{ cross_scan_diff.new_api_endpoints_count }}</div><div class="label">New API endpoints</div></div>
+    <div class="delta-card"><div class="number">{{ cross_scan_diff.new_findings_count }}</div><div class="label">New findings</div></div>
+    <div class="delta-card"><div class="number">{{ cross_scan_diff.verified_new_findings_count or 0 }}</div><div class="label">Verified new findings</div></div>
+  </div>
+  <p>
+    Candidate findings require analyst verification before they are treated as confirmed vulnerabilities.
+    False positives are counted separately: {{ cross_scan_diff.false_positive_new_findings_count or 0 }}.
+  </p>
+
+  <h3>New authenticated pages</h3>
+  <ul class="url-list">
+    {% for page in cross_scan_diff.new_pages[:50] %}<li><code>{{ page.url }}</code></li>{% else %}<li>No new authenticated pages recorded.</li>{% endfor %}
+  </ul>
+
+  <h3>New authenticated JS/resources</h3>
+  <ul class="url-list">
+    {% for resource in cross_scan_diff.new_js_files[:50] %}<li><code>{{ resource.url }}</code>{% if resource.source_map %}<span class="soft-badge">source map</span>{% endif %}</li>{% else %}<li>No new authenticated JavaScript resources recorded.</li>{% endfor %}
+    {% for sm in cross_scan_diff.new_source_maps[:20] %}<li><code>{{ sm.url }}</code><span class="soft-badge">source map</span></li>{% endfor %}
+  </ul>
+
+  <h3>New authenticated API endpoints</h3>
+  <table>
+    <tr><th>Endpoint</th><th>Risk hints</th><th>Verification</th></tr>
+    {% for endpoint in cross_scan_diff.new_api_endpoints[:50] %}
+    <tr>
+      <td class="wrap-url"><code>{{ endpoint.endpoint }}</code></td>
+      <td>{% for hint in endpoint.risk_hints %}<span class="hint-badge">{{ hint }}</span>{% endfor %}</td>
+      <td>{{ endpoint.verification_required }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3">No new authenticated API endpoints recorded.</td></tr>
+    {% endfor %}
+  </table>
+
+  <h3>New authenticated findings</h3>
+  <table>
+    <tr><th>Title</th><th>Severity</th><th>Confidence</th><th>Triage</th><th>Recurrence</th><th>Previous</th><th>Affected URL</th><th>Verification</th></tr>
+    {% for finding in cross_scan_diff.new_findings[:50] %}
+    <tr>
+      <td>{{ finding.title }}</td>
+      <td>{{ finding.severity }}</td>
+      <td>{{ finding.confidence }}</td>
+      <td><span class="triage-badge">{{ finding.triage_status or 'candidate' }}</span></td>
+      <td>{{ finding.recurrence_count or 1 }}</td>
+      <td>{{ finding.previous_triage_status or 'N/A' }}</td>
+      <td class="wrap-url"><code>{{ finding.affected_url or 'N/A' }}</code></td>
+      <td>{{ finding.verification_required }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8">No new authenticated findings recorded.</td></tr>
+    {% endfor %}
+  </table>
+
+  <h3>Sensitive endpoint hints</h3>
+  <p>
+    {% for hint in cross_scan_diff.sensitive_endpoint_hints %}
+    <span class="hint-badge">{{ hint }}</span>
+    {% else %}
+    No sensitive endpoint hints recorded.
+    {% endfor %}
+  </p>
+  {% else %}
+  <p>Cross-scan Auth Delta was not included for this report.</p>
+  {% endif %}
+
+  <h2>Security Findings ({{ security_findings | length }} active / {{ findings_count }} total)</h2>
+  {% for finding in security_findings %}
   <div class="finding">
     <div class="finding-header" style="background:{% if finding.severity.value == 'critical' %}#fff0f0{% elif finding.severity.value == 'high' %}#fff8f0{% elif finding.severity.value == 'medium' %}#fffdf0{% else %}#f0f9f0{% endif %}">
       <span class="badge badge-{{ finding.severity.value }}">{{ finding.severity.value }}</span>
@@ -116,7 +245,19 @@
           <label>Type</label>{{ finding.vulnerability_type.value | replace('_', ' ') | title }}
         </div>
         <div class="meta-item">
+          <label>Triage</label><span class="triage-badge">{{ finding.triage_status.value if finding.triage_status else 'candidate' }}</span>
+        </div>
+        <div class="meta-item">
           <label>CVSS Score</label>{{ finding.cvss_score or 'N/A' }}
+        </div>
+        <div class="meta-item">
+          <label>Recurrence</label>{{ finding.recurrence_count or 1 }}
+        </div>
+        <div class="meta-item" style="grid-column: span 2">
+          <label>Fingerprint</label><code style="word-break:break-all">{{ finding.fingerprint or 'N/A' }}</code>
+        </div>
+        <div class="meta-item">
+          <label>Previous Triage</label>{{ finding.evidence.previous_triage_status if finding.evidence and finding.evidence.previous_triage_status else 'N/A' }}
         </div>
         <div class="meta-item">
           <label>CWE</label>{% if finding.cwe_id %}CWE-{{ finding.cwe_id }}{% else %}N/A{% endif %}
@@ -134,6 +275,25 @@
       </div>
 
       <p>{{ finding.description }}</p>
+      {% if finding.duplicate_of_finding_id or (finding.evidence and (finding.evidence.previously_verified or finding.evidence.previously_marked_false_positive)) %}
+      <h3>Recurrence</h3>
+      <table>
+        <tr><th>Duplicate Of</th><td><code>{{ finding.duplicate_of_finding_id or 'N/A' }}</code></td></tr>
+        <tr><th>Previous Finding</th><td><code>{{ finding.evidence.previous_finding_id if finding.evidence else 'N/A' }}</code></td></tr>
+        <tr><th>Previously Verified</th><td>{{ finding.evidence.previously_verified if finding.evidence else false }}</td></tr>
+        <tr><th>Previously False Positive</th><td>{{ finding.evidence.previously_marked_false_positive if finding.evidence else false }}</td></tr>
+        <tr><th>First Seen</th><td>{{ finding.first_seen_at or 'N/A' }}</td></tr>
+        <tr><th>Last Seen</th><td>{{ finding.last_seen_at or 'N/A' }}</td></tr>
+      </table>
+      {% endif %}
+      {% if finding.analyst_note or finding.verification_note or finding.reviewed_at %}
+      <h3>Analyst Review</h3>
+      <table>
+        <tr><th>Analyst Note</th><td>{{ finding.analyst_note or 'N/A' }}</td></tr>
+        <tr><th>Verification Note</th><td>{{ finding.verification_note or 'N/A' }}</td></tr>
+        <tr><th>Reviewed At</th><td>{{ finding.reviewed_at or 'N/A' }}</td></tr>
+      </table>
+      {% endif %}
 
       {% if finding.code_snippet or (finding.evidence and finding.evidence.code_snippet) %}
       <pre>{{ finding.code_snippet or finding.evidence.code_snippet }}</pre>
@@ -159,6 +319,37 @@
   {% else %}
   <p style="color: #388e3c; font-weight: 600;">✓ No vulnerabilities found.</p>
   {% endfor %}
+
+  {% if false_positive_findings %}
+  <h2>False Positives</h2>
+  <p>These items are separated from active security findings and should not be read as confirmed vulnerabilities.</p>
+  {% for finding in false_positive_findings %}
+  <div class="finding false-positive">
+    <div class="finding-header">
+      <span class="triage-badge">false_positive</span>
+      <span class="finding-title">{{ finding.title }}</span>
+    </div>
+    <div class="finding-body">
+      <p>{{ finding.description }}</p>
+      <table>
+        <tr><th>Analyst Note</th><td>{{ finding.analyst_note or 'N/A' }}</td></tr>
+        <tr><th>Verification Note</th><td>{{ finding.verification_note or 'N/A' }}</td></tr>
+        <tr><th>Reviewed At</th><td>{{ finding.reviewed_at or 'N/A' }}</td></tr>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  {% if previously_false_positive_findings %}
+  <h2>Previously False Positive Candidates</h2>
+  <p>These candidate findings match findings previously marked false positive. They are not confirmed vulnerabilities and still require analyst verification.</p>
+  <ul>
+    {% for finding in previously_false_positive_findings %}
+    <li>{{ finding.title }} — previous finding <code>{{ finding.evidence.previous_finding_id if finding.evidence else 'N/A' }}</code></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
 
   {% if owasp_mapping %}
   <h2>OWASP Top 10 Mapping</h2>

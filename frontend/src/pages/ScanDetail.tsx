@@ -1,11 +1,12 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { AlertTriangle, CheckCircle, FileText, Globe, Layers, Loader2, Radio, XCircle } from "lucide-react";
-import { useEffect } from "react";
+import { AlertTriangle, CheckCircle, FileText, GitCompareArrows, Globe, Layers, Loader2, Radio, XCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import toast from "react-hot-toast";
 import { Link, useParams } from "react-router-dom";
-import { Badge, Card, EmptyState, PageHeader, PageShell } from "../components/ui";
+import { Badge, Button, Card, EmptyState, PageHeader, PageShell, Select } from "../components/ui";
 import { useScanProgress } from "../hooks/useScanProgress";
-import { getScan } from "../lib/api";
+import { compareScans, generateReport, getDiffCandidates, getScan } from "../lib/api";
 
 const STATUS_CONFIG: Record<string, { tone: string; icon: React.ReactNode; label: string; description: string }> = {
   pending: { tone: "neutral", icon: <Loader2 className="h-4 w-4" />, label: "Pending", description: "Queued and waiting for a worker." },
@@ -21,6 +22,8 @@ const STATUS_CONFIG: Record<string, { tone: string; icon: React.ReactNode; label
 export function ScanDetail() {
   const { scanId } = useParams<{ scanId: string }>();
   const qc = useQueryClient();
+  const [compareScanId, setCompareScanId] = useState("");
+  const [diffResult, setDiffResult] = useState<any>(null);
 
   const { data: scan, isLoading } = useQuery({
     queryKey: ["scan", scanId],
@@ -34,6 +37,27 @@ export function ScanDetail() {
 
   const active = scan && ["crawling", "analyzing", "authenticating", "reporting"].includes(scan.status);
   const wsProgress = useScanProgress(scanId, Boolean(active));
+
+  const { data: diffCandidates = [] } = useQuery({
+    queryKey: ["diff-candidates", scanId],
+    queryFn: () => getDiffCandidates(scanId!),
+    enabled: Boolean(scanId && scan?.status === "completed"),
+  });
+
+  const compareMutation = useMutation({
+    mutationFn: () => compareScans(scanId!, compareScanId),
+    onSuccess: (data) => {
+      setDiffResult(data);
+      toast.success("Comparison complete");
+    },
+    onError: (err: any) => toast.error(err.response?.data?.detail ?? "Failed to compare scans"),
+  });
+
+  const comparisonReportMutation = useMutation({
+    mutationFn: () => generateReport(scanId!, "html", "full", compareScanId),
+    onSuccess: () => toast.success("Comparison report generation started"),
+    onError: (err: any) => toast.error(err.response?.data?.detail ?? "Failed to generate comparison report"),
+  });
 
   useEffect(() => {
     if (wsProgress) {
@@ -148,6 +172,65 @@ export function ScanDetail() {
           </Card>
         ))}
       </div>
+
+      {scan.status === "completed" && diffCandidates.length > 0 && (
+        <Card className="mt-6 p-5">
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="font-semibold text-white">Cross-scan compare</h2>
+              <p className="mt-1 text-sm text-slate-500">Compare this scan against another completed scan from the same project and origin.</p>
+            </div>
+            {diffResult && (
+              <Button onClick={() => comparisonReportMutation.mutate()} disabled={comparisonReportMutation.isPending || !compareScanId}>
+                {comparisonReportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                Generate comparison report
+              </Button>
+            )}
+          </div>
+          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+            <Select value={compareScanId} onChange={(e) => { setCompareScanId(e.target.value); setDiffResult(null); }}>
+              <option value="">Select comparison scan</option>
+              {diffCandidates.map((candidate: any) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.auth_method} · {candidate.target_url} · {candidate.id.slice(0, 8)}
+                </option>
+              ))}
+            </Select>
+            <Button variant="secondary" onClick={() => compareMutation.mutate()} disabled={!compareScanId || compareMutation.isPending}>
+              {compareMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitCompareArrows className="h-4 w-4" />}
+              Compare
+            </Button>
+          </div>
+          {diffResult && (
+            <div className="mt-5 grid gap-3 sm:grid-cols-5">
+              {[
+                ["New pages", diffResult.new_pages_count],
+                ["New resources", diffResult.new_resources_count],
+                ["New APIs", diffResult.new_api_endpoints_count],
+                ["New findings", diffResult.new_findings_count],
+                ["High confidence", diffResult.high_confidence_new_findings_count],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <div className="text-lg font-semibold text-white">{value}</div>
+                  <div className="text-xs text-slate-500">{label}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {diffResult?.new_api_endpoints?.length > 0 && (
+            <div className="mt-4">
+              <div className="mb-2 text-sm font-medium text-slate-300">New authenticated API endpoints</div>
+              <div className="space-y-2">
+                {diffResult.new_api_endpoints.slice(0, 5).map((endpoint: any) => (
+                  <div key={endpoint.endpoint} className="break-all rounded-lg border border-slate-800 bg-slate-950/40 p-3 font-mono text-xs text-slate-300">
+                    {endpoint.endpoint}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
     </PageShell>
   );
 }
