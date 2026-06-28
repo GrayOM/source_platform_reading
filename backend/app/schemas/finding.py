@@ -76,6 +76,7 @@ class FindingOut(BaseModel):
     previous_finding_id: str | None
     previously_verified: bool
     previously_marked_false_positive: bool
+    artifact_count: int = 0
     created_at: datetime
 
     model_config = {"from_attributes": True}

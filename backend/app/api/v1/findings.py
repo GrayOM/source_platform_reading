@@ -4,11 +4,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import case, or_, select
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import DB, CurrentUser
-from app.models.finding import Finding, Severity, TriageStatus
+from app.models.finding import Finding, FindingEvidenceArtifact, Severity, TriageStatus
 from app.models.project import Project
 from app.models.scan import Scan
+from app.schemas.evidence import EvidenceArtifactOut
 from app.schemas.finding import FindingOut, FindingTriageUpdate, FindingUpdate
 
 router = APIRouter(prefix="/findings", tags=["findings"])
@@ -33,6 +35,7 @@ async def list_findings(
         .join(Scan)
         .join(Project)
         .where(Project.user_id == current_user.id)
+        .options(selectinload(Finding.evidence_artifacts))
     )
     if scan_id:
         q = q.where(Finding.scan_id == scan_id)
@@ -68,11 +71,27 @@ async def get_finding(finding_id: uuid.UUID, current_user: CurrentUser, db: DB) 
         .join(Scan)
         .join(Project)
         .where(Finding.id == finding_id, Project.user_id == current_user.id)
+        .options(selectinload(Finding.evidence_artifacts))
     )
     finding = result.scalar_one_or_none()
     if not finding:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Finding not found")
     return finding
+
+
+@router.get("/{finding_id}/artifacts", response_model=list[EvidenceArtifactOut])
+async def list_finding_artifacts(
+    finding_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DB,
+) -> list[FindingEvidenceArtifact]:
+    finding = await get_finding(finding_id, current_user, db)
+    result = await db.execute(
+        select(FindingEvidenceArtifact)
+        .where(FindingEvidenceArtifact.finding_id == finding.id)
+        .order_by(FindingEvidenceArtifact.created_at.desc())
+    )
+    return list(result.scalars().all())
 
 
 @router.patch("/{finding_id}", response_model=FindingOut)

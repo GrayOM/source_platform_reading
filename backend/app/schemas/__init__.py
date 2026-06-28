@@ -1,4 +1,5 @@
 from app.schemas.finding import FindingCreate, FindingOut, FindingTriageUpdate, FindingUpdate
+from app.schemas.evidence import ArtifactSummaryOut, EvidenceArtifactOut
 from app.schemas.project import ProjectCreate, ProjectOut, ProjectUpdate
 from app.schemas.report import ReportOut, ReportRequest
 from app.schemas.resource import ResourceOut
@@ -10,6 +11,6 @@ __all__ = [
     "ProjectCreate", "ProjectUpdate", "ProjectOut",
     "ScanCreate", "ScanConfig", "ScanOut", "ScanProgress",
     "ResourceOut",
-    "FindingCreate", "FindingUpdate", "FindingTriageUpdate", "FindingOut",
+    "FindingCreate", "FindingUpdate", "FindingTriageUpdate", "FindingOut", "ArtifactSummaryOut", "EvidenceArtifactOut",
     "ReportRequest", "ReportOut",
 ]

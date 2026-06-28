@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { AlertTriangle, CheckCircle, FileText, GitCompareArrows, Globe, Layers, Loader2, Radio, XCircle } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle, Code2, FileText, GitCompareArrows, Globe, Layers, Loader2, Radio, Route, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { Link, useParams } from "react-router-dom";
 import { Badge, Button, Card, EmptyState, PageHeader, PageShell, Select } from "../components/ui";
 import { useScanProgress } from "../hooks/useScanProgress";
-import { compareScans, generateReport, getDiffCandidates, getScan } from "../lib/api";
+import { compareScans, generateReport, getDiffCandidates, getScan, getScanArtifacts } from "../lib/api";
 
 const STATUS_CONFIG: Record<string, { tone: string; icon: React.ReactNode; label: string; description: string }> = {
   pending: { tone: "neutral", icon: <Loader2 className="h-4 w-4" />, label: "Pending", description: "Queued and waiting for a worker." },
@@ -41,6 +41,12 @@ export function ScanDetail() {
   const { data: diffCandidates = [] } = useQuery({
     queryKey: ["diff-candidates", scanId],
     queryFn: () => getDiffCandidates(scanId!),
+    enabled: Boolean(scanId && scan?.status === "completed"),
+  });
+
+  const { data: artifacts = [] } = useQuery({
+    queryKey: ["scan-artifacts", scanId],
+    queryFn: () => getScanArtifacts(scanId!),
     enabled: Boolean(scanId && scan?.status === "completed"),
   });
 
@@ -172,6 +178,30 @@ export function ScanDetail() {
           </Card>
         ))}
       </div>
+
+      {scan.status === "completed" && (
+        <Card className="mt-6 p-5">
+          <div className="mb-4 flex items-center gap-2">
+            <FileText className="h-4 w-4 text-emerald-300" />
+            <h2 className="font-semibold text-white">Artifact Summary</h2>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-5">
+            {[
+              [FileText, "Total", artifacts.length],
+              [Camera, "Screenshots", artifacts.filter((a: any) => a.artifact_type === "screenshot").length],
+              [Code2, "Source files", artifacts.filter((a: any) => a.artifact_type === "source_file" || a.artifact_type === "source_map").length],
+              [Route, "API flows", artifacts.filter((a: any) => a.artifact_type === "api_flow").length],
+              [ShieldCheck, "Authenticated", artifacts.filter((a: any) => a.auth_context === "authenticated").length],
+            ].map(([Icon, label, value]: any) => (
+              <div key={label} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                <Icon className="mb-2 h-4 w-4 text-slate-400" />
+                <div className="text-xl font-semibold text-white">{value}</div>
+                <div className="text-xs text-slate-500">{label}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {scan.status === "completed" && diffCandidates.length > 0 && (
         <Card className="mt-6 p-5">

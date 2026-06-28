@@ -5,6 +5,7 @@ downloads all unique resources while respecting scope and limits.
 """
 import asyncio
 import hashlib
+import json
 import re
 import urllib.parse
 from dataclasses import dataclass, field
@@ -21,6 +22,7 @@ from app.models.resource import ResourceType
 from app.services.auth.session_manager import apply_session_to_context
 from app.services.crawler.sitemap_builder import SitemapBuilder
 from app.services.collector.resource_classifier import classify_url, classify_mime
+from app.services.evidence.redaction import redact_value, redacted_preview
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -34,6 +36,7 @@ class CrawlResult:
     endpoint_candidates: list[str] = field(default_factory=list)
     websocket_urls: list[str] = field(default_factory=list)
     failed_urls: list[dict] = field(default_factory=list)
+    artifact_candidates: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -86,6 +89,7 @@ class PlaywrightCrawler:
         self.endpoint_candidates: set[str] = set()
         self.ws_urls: set[str] = set()
         self.failed_urls: list[dict] = []
+        self.artifact_candidates: list[dict] = []
         self.sitemap_builder = SitemapBuilder()
         self.semaphore: asyncio.Semaphore | None = None
         self.authenticated_context = bool(
@@ -157,6 +161,7 @@ class PlaywrightCrawler:
             endpoint_candidates=list(self.endpoint_candidates),
             websocket_urls=list(self.ws_urls),
             failed_urls=self.failed_urls,
+            artifact_candidates=self.artifact_candidates,
         )
 
     async def _crawl_page(self, context: BrowserContext, url: str, depth: int, parent: str | None) -> None:
@@ -177,6 +182,8 @@ class PlaywrightCrawler:
                 page: Page = await context.new_page()
                 discovered_on_this_page: list[str] = []
 
+                page.on("response", lambda resp: self._record_api_response(resp))
+
                 async def handle_request(route: Route):
                     req = route.request
                     req_url = req.url
@@ -184,6 +191,7 @@ class PlaywrightCrawler:
 
                     if resource_type in ("xhr", "fetch"):
                         self.endpoint_candidates.add(req_url)
+                        self._record_api_request(req)
                     elif resource_type == "websocket":
                         self.ws_urls.add(req_url)
                     elif resource_type in ("script", "stylesheet", "image", "font", "document"):
@@ -223,6 +231,31 @@ class PlaywrightCrawler:
                 if self.screenshot:
                     screenshot_path = self.output_dir / "screenshots" / f"{_url_to_filename(url)}.png"
                     await page.screenshot(path=str(screenshot_path), full_page=True)
+                    self.artifact_candidates.append(
+                        {
+                            "artifact_type": "screenshot",
+                            "title": "Page screenshot",
+                            "description": f"Screenshot captured during page visit: {url}",
+                            "url": url,
+                            "status_code": status if response else None,
+                            "screenshot_path": str(screenshot_path),
+                            "auth_context": self._auth_context(),
+                        }
+                    )
+
+                self.artifact_candidates.append(
+                    {
+                        "artifact_type": "response",
+                        "title": "Page visit",
+                        "description": f"Visited page during crawl: {url}",
+                        "url": final_url if response else url,
+                        "status_code": status if response else None,
+                        "content_type": content_type if response else None,
+                        "auth_context": self._auth_context(),
+                        "metadata": {"requested_url": url, "parent": parent},
+                    }
+                )
+                await self._record_storage_snapshot(page, url)
 
                 # Extract navigable page links only. Scripts/styles are captured
                 # by the request route and must not be re-queued as pages.
@@ -353,6 +386,81 @@ class PlaywrightCrawler:
             metadata["auth_context"] = "authenticated"
             metadata["discovered_after_login"] = True
         return metadata
+
+    def _auth_context(self) -> str:
+        return "authenticated" if self.authenticated_context else "anonymous"
+
+    def _record_api_request(self, request) -> None:
+        try:
+            preview = None
+            post_data = request.post_data
+            if post_data:
+                preview = redacted_preview(post_data)
+            self.artifact_candidates.append(
+                {
+                    "artifact_type": "api_flow",
+                    "title": "API flow candidate",
+                    "description": "XHR/fetch request observed during crawl. Manual authorization verification is required.",
+                    "url": request.url,
+                    "http_method": request.method,
+                    "redacted_body_preview": preview,
+                    "auth_context": self._auth_context(),
+                    "verification_required": True,
+                    "metadata": {"resource_type": request.resource_type},
+                }
+            )
+        except Exception as exc:
+            log.warning("crawl.api_request_artifact_failed", error=str(exc))
+
+    def _record_api_response(self, response) -> None:
+        try:
+            request = response.request
+            if request.resource_type not in ("xhr", "fetch"):
+                return
+            self.artifact_candidates.append(
+                {
+                    "artifact_type": "response",
+                    "title": "API response candidate",
+                    "description": "Response metadata observed for an XHR/fetch API candidate.",
+                    "url": response.url,
+                    "http_method": request.method,
+                    "status_code": response.status,
+                    "content_type": response.headers.get("content-type", "").split(";")[0].lower() or None,
+                    "auth_context": self._auth_context(),
+                    "verification_required": True,
+                }
+            )
+        except Exception as exc:
+            log.warning("crawl.api_response_artifact_failed", error=str(exc))
+
+    async def _record_storage_snapshot(self, page: Page, url: str) -> None:
+        try:
+            snapshot = await page.evaluate(
+                """() => ({
+                    localStorage: Object.fromEntries(Object.entries(localStorage)),
+                    sessionStorage: Object.fromEntries(Object.entries(sessionStorage))
+                })"""
+            )
+        except Exception as exc:
+            log.warning("crawl.storage_snapshot_failed", url=url, error=str(exc))
+            return
+
+        for storage_type, values in (snapshot or {}).items():
+            if not isinstance(values, dict) or not values:
+                continue
+            redacted = {str(key): redact_value(str(key), value) for key, value in values.items()}
+            self.artifact_candidates.append(
+                {
+                    "artifact_type": "storage_snapshot",
+                    "title": f"{storage_type} snapshot",
+                    "description": f"Browser storage keys observed on {url}. Sensitive-looking values are redacted.",
+                    "url": url,
+                    "storage_type": storage_type,
+                    "redacted_body_preview": json.dumps(redacted, ensure_ascii=False, default=str)[:2000],
+                    "auth_context": self._auth_context(),
+                    "metadata": {"keys": list(redacted.keys())},
+                }
+            )
 
 
 def _url_to_filename(url: str) -> str:

@@ -97,6 +97,7 @@
     <tr><th>Candidate Findings</th><td>{{ triage_counts.candidate }}</td></tr>
     <tr><th>New Findings</th><td>{{ recurrence_counts.new_findings_count }}</td></tr>
     <tr><th>Recurring Findings</th><td>{{ recurrence_counts.recurring_findings_count }}</td></tr>
+    <tr><th>Evidence Artifacts</th><td>{{ evidence_summary.total_artifacts_count }}</td></tr>
   </table>
 
   <h2>Triage Summary</h2>
@@ -108,6 +109,16 @@
     <tr><td>False Positive</td><td>{{ triage_counts.false_positive }}</td></tr>
     <tr><td>Accepted Risk</td><td>{{ triage_counts.accepted_risk }}</td></tr>
     <tr><td>Fixed</td><td>{{ triage_counts.fixed }}</td></tr>
+  </table>
+
+  <h2>Evidence Artifact Summary</h2>
+  <table>
+    <tr><th>Metric</th><th>Count</th></tr>
+    <tr><td>Total</td><td>{{ evidence_summary.total_artifacts_count }}</td></tr>
+    <tr><td>Screenshots</td><td>{{ evidence_summary.screenshot_artifacts_count }}</td></tr>
+    <tr><td>API flows</td><td>{{ evidence_summary.api_flow_artifacts_count }}</td></tr>
+    <tr><td>Source files</td><td>{{ evidence_summary.source_file_artifacts_count }}</td></tr>
+    <tr><td>Authenticated</td><td>{{ evidence_summary.authenticated_artifacts_count }}</td></tr>
   </table>
 
   <h2>Recurrence Summary</h2>
@@ -262,6 +273,9 @@
         <div class="meta-item">
           <label>CWE</label>{% if finding.cwe_id %}CWE-{{ finding.cwe_id }}{% else %}N/A{% endif %}
         </div>
+        <div class="meta-item">
+          <label>Evidence Artifacts</label>{{ artifacts_by_finding.get(finding.id|string, []) | length }}
+        </div>
         {% if finding.owasp_category %}
         <div class="meta-item">
           <label>OWASP</label>{{ finding.owasp_category }}
@@ -303,6 +317,25 @@
       <h3>PoC</h3>
       <pre>{{ finding.poc | tojson(indent=2) }}</pre>
       {% endif %}
+
+      <h3>Evidence Artifacts</h3>
+      <table>
+        <tr><th>Type</th><th>Title</th><th>URL / Path</th><th>Hash</th><th>Auth</th></tr>
+        {% for artifact in artifacts_by_finding.get(finding.id|string, [])[:5] %}
+        <tr>
+          <td>{{ artifact.artifact_type }}</td>
+          <td>{{ artifact.title }}</td>
+          <td class="wrap-url"><code>{{ artifact.url or artifact.file_path or artifact.screenshot_path or 'N/A' }}</code></td>
+          <td><code>{{ artifact.content_hash or 'N/A' }}</code></td>
+          <td>{{ artifact.auth_context or 'N/A' }}</td>
+        </tr>
+        {% if artifact.redacted_body_preview %}
+        <tr><td colspan="5"><pre>{{ artifact.redacted_body_preview[:1000] }}</pre></td></tr>
+        {% endif %}
+        {% else %}
+        <tr><td colspan="5">No linked artifacts.</td></tr>
+        {% endfor %}
+      </table>
 
       {% if finding.reproduction_steps %}
       <h3>Reproduction Steps</h3>
@@ -350,6 +383,23 @@
     {% endfor %}
   </ul>
   {% endif %}
+
+  <h2>Appendix: Evidence Artifact Index</h2>
+  <table>
+    <tr><th>Type</th><th>Title</th><th>URL / Path</th><th>Hash</th><th>Auth</th><th>Finding</th></tr>
+    {% for artifact in artifact_index[:500] %}
+    <tr>
+      <td>{{ artifact.artifact_type }}</td>
+      <td>{{ artifact.title }}</td>
+      <td class="wrap-url"><code>{{ artifact.url or artifact.file_path or artifact.screenshot_path or 'N/A' }}</code></td>
+      <td><code>{{ artifact.content_hash or 'N/A' }}</code></td>
+      <td>{{ artifact.auth_context or 'N/A' }}</td>
+      <td><code>{{ artifact.finding_id or 'N/A' }}</code></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6">No evidence artifacts recorded.</td></tr>
+    {% endfor %}
+  </table>
 
   {% if owasp_mapping %}
   <h2>OWASP Top 10 Mapping</h2>

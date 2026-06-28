@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight, ExternalLink, FileText, Shield } from "lucid
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { Badge, Button, Card, CodeBlock, EmptyState, PageHeader, PageShell, Select, TextArea } from "../components/ui";
-import { getFindings, updateFinding, updateFindingTriage } from "../lib/api";
+import { getFindingArtifacts, getFindings, updateFinding, updateFindingTriage } from "../lib/api";
 
 const severities = ["critical", "high", "medium", "low", "info"] as const;
 const triageFilters = [
@@ -50,6 +50,59 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+function ArtifactList({ findingId, enabled }: { findingId: string; enabled: boolean }) {
+  const { data: artifacts = [], isLoading } = useQuery({
+    queryKey: ["finding-artifacts", findingId],
+    queryFn: () => getFindingArtifacts(findingId),
+    enabled,
+  });
+
+  if (isLoading) {
+    return <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-500">Loading artifacts...</div>;
+  }
+  if (artifacts.length === 0) {
+    return <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-500">No linked evidence artifacts.</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {artifacts.map((artifact: any) => (
+        <div key={artifact.id} className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Badge tone="info">{artifact.artifact_type}</Badge>
+            {artifact.auth_context && <Badge tone={artifact.auth_context === "authenticated" ? "low" : "neutral"}>{artifact.auth_context}</Badge>}
+            {artifact.verification_required && <Badge tone="medium">verification required</Badge>}
+          </div>
+          <div className="text-sm font-semibold text-white">{artifact.title}</div>
+          {artifact.description && <p className="mt-1 text-sm leading-6 text-slate-400">{artifact.description}</p>}
+          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+            {[
+              ["URL", artifact.url],
+              ["Source path", artifact.file_path],
+              ["Screenshot", artifact.screenshot_path],
+              ["Hash", artifact.content_hash],
+              ["HTTP", artifact.http_method || artifact.status_code ? `${artifact.http_method ?? ""} ${artifact.status_code ?? ""}`.trim() : null],
+              ["Content type", artifact.content_type],
+              ["Line range", artifact.line_start ? `${artifact.line_start}${artifact.line_end && artifact.line_end !== artifact.line_start ? `-${artifact.line_end}` : ""}` : null],
+              ["Storage", artifact.storage_type || artifact.storage_key ? `${artifact.storage_type ?? ""} ${artifact.storage_key ?? ""}`.trim() : null],
+            ].filter(([, value]) => Boolean(value)).map(([label, value]) => (
+              <div key={label} className="min-w-0 rounded-md border border-slate-800 bg-slate-950/70 p-2">
+                <span className="block text-slate-500">{label}</span>
+                <code className="mt-1 block break-all text-slate-300">{value}</code>
+              </div>
+            ))}
+          </div>
+          {(artifact.redacted_body_preview || artifact.redacted_value) && (
+            <div className="mt-3 max-h-56 overflow-auto rounded-md border border-slate-800 bg-slate-950 p-3 font-mono text-xs text-slate-300">
+              <pre className="whitespace-pre-wrap break-words">{artifact.redacted_body_preview || artifact.redacted_value}</pre>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function FindingCard({ finding }: { finding: any }) {
   const [expanded, setExpanded] = useState(false);
   const [triageStatus, setTriageStatus] = useState(finding.triage_status ?? "candidate");
@@ -89,6 +142,8 @@ function FindingCard({ finding }: { finding: any }) {
             <span>{finding.agent_name}</span>
             <span>·</span>
             <span>{isRecurring ? "Recurring" : "New"}</span>
+            <span>·</span>
+            <span>{finding.artifact_count ?? 0} artifacts</span>
             {finding.affected_url && (
               <>
                 <span>·</span>
@@ -172,6 +227,10 @@ function FindingCard({ finding }: { finding: any }) {
               <CodeBlock tone="blue">{poc}</CodeBlock>
             </Section>
           )}
+
+          <Section title="Evidence artifacts">
+            <ArtifactList findingId={finding.id} enabled={expanded} />
+          </Section>
 
           {finding.reproduction_steps?.length > 0 && (
             <Section title="Reproduction steps">

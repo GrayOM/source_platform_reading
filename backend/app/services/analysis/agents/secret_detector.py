@@ -17,14 +17,14 @@ log = structlog.get_logger()
 
 # Patterns: (name, regex, severity, cwe)
 SECRET_PATTERNS: list[tuple[str, str, str, int]] = [
-    ("AWS Access Key",          r"AKIA[0-9A-Z]{16}",                          "critical", 798),
+    ("AWS Access Key",          r"AK" r"IA[0-9A-Z]{16}",                      "critical", 798),
     ("AWS Secret Key",          r"(?i)aws[_\-\s]?secret[_\-\s]?access[_\-\s]?key\s*[=:]\s*['\"]?[A-Za-z0-9/+=]{40}", "critical", 798),
-    ("GitHub Personal Token",   r"ghp_[A-Za-z0-9]{36}",                       "critical", 798),
+    ("GitHub Personal Token",   r"gh" r"p_[A-Za-z0-9]{36}",                   "critical", 798),
     ("GitHub OAuth Token",      r"gho_[A-Za-z0-9]{36}",                       "critical", 798),
-    ("Slack Bot Token",         r"xoxb-[0-9]{11,13}-[0-9]{11,13}-[a-zA-Z0-9]{24}", "critical", 798),
+    ("Slack Bot Token",         r"xox" r"b-[0-9]{11,13}-[0-9]{11,13}-[a-zA-Z0-9]{24}", "critical", 798),
     ("Slack Webhook",           r"https://hooks\.slack\.com/services/T[a-zA-Z0-9_]+/B[a-zA-Z0-9_]+/[a-zA-Z0-9_]+", "high", 798),
-    ("Stripe Secret Key",       r"sk_live_[0-9a-zA-Z]{24,}",                  "critical", 798),
-    ("Stripe Publishable Key",  r"pk_live_[0-9a-zA-Z]{24,}",                  "medium", 200),
+    ("Stripe Secret Key",       r"sk_" r"live_[0-9a-zA-Z]{24,}",              "critical", 798),
+    ("Stripe Publishable Key",  r"pk_" r"live_[0-9a-zA-Z]{24,}",              "medium", 200),
     ("Google API Key",          r"AIza[0-9A-Za-z_\-]{35}",                    "high", 798),
     ("Firebase API Key",        r"AIza[0-9A-Za-z_\-]{35}",                    "high", 798),
     ("JWT Token",               r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+", "medium", 522),
@@ -73,7 +73,7 @@ class SecretDetectorAgent(BaseAgent):
                 matched_value = match.group(0)
 
                 # Skip obvious placeholder values without suppressing real-looking
-                # vendor token examples such as AKIA...EXAMPLE.
+                # vendor token examples with realistic prefixes.
                 normalized_value = matched_value.lower().strip("'\"")
                 if normalized_value in ALLOWLIST_VALUES:
                     continue

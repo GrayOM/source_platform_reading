@@ -139,9 +139,12 @@ def _run_crawl(scan, output_dir: Path):
 
 def _persist_resources(scan_id: str, crawl_result, db) -> None:
     from app.models.resource import Resource
+    from app.services.evidence.artifacts import build_candidate_artifact, build_resource_artifact
+    scan_uuid = uuid.UUID(scan_id)
+    resources: list[Resource] = []
     for r in crawl_result.resources:
         resource = Resource(
-            scan_id=uuid.UUID(scan_id),
+            scan_id=scan_uuid,
             url=r.url,
             resource_type=r.resource_type,
             file_path=r.file_path,
@@ -155,6 +158,15 @@ def _persist_resources(scan_id: str, crawl_result, db) -> None:
             extra_metadata=r.metadata,
         )
         db.add(resource)
+        resources.append(resource)
+    db.flush()
+    for resource in resources:
+        db.add(build_resource_artifact(scan_uuid, resource))
+    for candidate in getattr(crawl_result, "artifact_candidates", []) or []:
+        try:
+            db.add(build_candidate_artifact(scan_uuid, candidate))
+        except Exception as exc:
+            log.warning("scan.artifact_candidate_persist_failed", scan_id=scan_id, error=str(exc))
 
 
 async def _run_analysis_async(scan_id: str, target_url: str, crawl_result, output_dir: Path) -> int:

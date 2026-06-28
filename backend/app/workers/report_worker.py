@@ -35,10 +35,18 @@ def generate_report(self, report_id: str, compare_scan_id: str | None = None) ->
         scan = db.execute(
             select(Scan)
             .where(Scan.id == report.scan_id)
-            .options(selectinload(Scan.session), selectinload(Scan.resources), selectinload(Scan.findings))
+            .options(
+                selectinload(Scan.session),
+                selectinload(Scan.project),
+                selectinload(Scan.resources),
+                selectinload(Scan.findings).selectinload(Finding.evidence_artifacts),
+                selectinload(Scan.evidence_artifacts),
+            )
         ).scalar_one()
         findings = db.execute(
-            select(Finding).where(Finding.scan_id == report.scan_id)
+            select(Finding)
+            .where(Finding.scan_id == report.scan_id)
+            .options(selectinload(Finding.evidence_artifacts))
         ).scalars().all()
         cross_scan_diff = None
         if compare_scan_id:

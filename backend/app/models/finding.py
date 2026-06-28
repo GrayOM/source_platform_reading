@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -53,6 +53,19 @@ class VulnType(str, enum.Enum):
     OTHER = "other"
 
 
+class EvidenceArtifactType(str, enum.Enum):
+    SOURCE_FILE = "source_file"
+    CODE_SNIPPET = "code_snippet"
+    REQUEST = "request"
+    RESPONSE = "response"
+    SCREENSHOT = "screenshot"
+    STORAGE_SNAPSHOT = "storage_snapshot"
+    SOURCE_MAP = "source_map"
+    API_FLOW = "api_flow"
+    REPRODUCTION = "reproduction"
+    REPORT_ATTACHMENT = "report_attachment"
+
+
 class Finding(Base):
     __tablename__ = "findings"
 
@@ -100,6 +113,13 @@ class Finding(Base):
 
     scan: Mapped["Scan"] = relationship("Scan", back_populates="findings")
     resource: Mapped["Resource | None"] = relationship("Resource", back_populates="findings")
+    evidence_artifacts: Mapped[list["FindingEvidenceArtifact"]] = relationship(
+        "FindingEvidenceArtifact", back_populates="finding", cascade="all, delete-orphan"
+    )
+
+    @property
+    def artifact_count(self) -> int:
+        return len(getattr(self, "evidence_artifacts", []) or [])
 
     @property
     def previous_triage_status(self) -> str | None:
@@ -116,3 +136,38 @@ class Finding(Base):
     @property
     def previously_marked_false_positive(self) -> bool:
         return bool((self.evidence or {}).get("previously_marked_false_positive"))
+
+
+class FindingEvidenceArtifact(Base):
+    __tablename__ = "finding_evidence_artifacts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scans.id"), nullable=False, index=True)
+    finding_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("findings.id"), nullable=True, index=True
+    )
+    artifact_type: Mapped[EvidenceArtifactType] = mapped_column(Enum(EvidenceArtifactType), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    http_method: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    redacted_body_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    line_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    line_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    storage_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    redacted_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    screenshot_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    auth_context: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    verification_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    extra_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    scan: Mapped["Scan"] = relationship("Scan", back_populates="evidence_artifacts")
+    finding: Mapped["Finding | None"] = relationship("Finding", back_populates="evidence_artifacts")

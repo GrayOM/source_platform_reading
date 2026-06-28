@@ -1,4 +1,6 @@
 import uuid
+import json
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, status
@@ -7,14 +9,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DB, CurrentUser
+from app.core.config import get_settings
+from app.models.finding import Finding
 from app.models.project import Project
-from app.models.report import Report
+from app.models.report import Report, ReportFormat, ReportType
 from app.models.scan import Scan, ScanStatus
 from app.schemas.report import ReportOut, ReportRequest
+from app.services.report.report_engine import ReportEngine
 from app.services.scan_diff import normalized_origin
 from app.workers.report_worker import generate_report
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+settings = get_settings()
 
 
 @router.post("/scans/{scan_id}/generate", response_model=ReportOut, status_code=status.HTTP_202_ACCEPTED)
@@ -89,6 +95,55 @@ async def list_reports(scan_id: uuid.UUID, current_user: CurrentUser, db: DB) ->
         .order_by(Report.created_at.desc())
     )
     return list(result.scalars().all())
+
+
+@router.post("/scans/{scan_id}/evidence-bundle")
+async def export_evidence_bundle(scan_id: uuid.UUID, current_user: CurrentUser, db: DB) -> FileResponse:
+    result = await db.execute(
+        select(Scan)
+        .join(Project)
+        .where(Scan.id == scan_id, Project.user_id == current_user.id)
+        .options(
+            selectinload(Scan.session),
+            selectinload(Scan.project),
+            selectinload(Scan.resources),
+            selectinload(Scan.evidence_artifacts),
+            selectinload(Scan.findings).selectinload(Finding.evidence_artifacts),
+        )
+    )
+    scan = result.scalar_one_or_none()
+    if not scan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan not found")
+    if scan.status != ScanStatus.COMPLETED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Scan not yet completed")
+
+    output_dir = settings.scan_data_path / str(scan.id) / "reports"
+    engine = ReportEngine(scan=scan, findings=list(scan.findings), output_dir=output_dir)
+    json_report = engine.generate(ReportFormat.JSON, ReportType.FULL)
+    markdown_report = engine.generate(ReportFormat.MARKDOWN, ReportType.FULL)
+    html_report = engine.generate(ReportFormat.HTML, ReportType.FULL)
+    kisa_html_report = engine.generate(ReportFormat.HTML, ReportType.KISA)
+    kisa_markdown_report = engine.generate(ReportFormat.MARKDOWN, ReportType.KISA)
+    ctx = engine._build_context(ReportType.FULL)
+    artifact_index_path = output_dir / "artifact_index.json"
+    artifact_index_path.write_text(json.dumps(ctx["artifact_index"], indent=2, default=str), encoding="utf-8")
+
+    bundle_path = output_dir / f"evidence_bundle_{str(scan.id)[:8]}.zip"
+    with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in (json_report, markdown_report, html_report, artifact_index_path):
+            zf.write(path, arcname=path.name)
+        zf.write(kisa_html_report, arcname="kisa_report.html")
+        zf.write(kisa_markdown_report, arcname="kisa_summary.md")
+        for artifact in scan.evidence_artifacts:
+            screenshot_path = Path(artifact.screenshot_path) if artifact.screenshot_path else None
+            if screenshot_path and screenshot_path.exists() and screenshot_path.is_file():
+                zf.write(screenshot_path, arcname=f"screenshots/{screenshot_path.name}")
+
+    return FileResponse(
+        path=str(bundle_path),
+        media_type="application/zip",
+        filename=bundle_path.name,
+    )
 
 
 @router.get("/{report_id}/download")

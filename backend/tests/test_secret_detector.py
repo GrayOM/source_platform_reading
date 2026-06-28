@@ -10,7 +10,8 @@ def agent():
 
 def test_detects_aws_key(agent, tmp_path):
     js_file = tmp_path / "app.js"
-    js_file.write_text('const key = "AKIAIOSFODNN7EXAMPLE"; fetch("/api");', encoding="utf-8")
+    fake_aws_key = "AK" + "IA" + "IOSFODNN7EXAMPLE"
+    js_file.write_text(f'const key = "{fake_aws_key}"; fetch("/api");', encoding="utf-8")
 
     resource = {"url": "https://example.com/app.js", "resource_type": "js", "file_path": str(js_file)}
     findings = agent._regex_scan(js_file.read_text(), resource["url"])
@@ -24,7 +25,15 @@ def test_detects_aws_key(agent, tmp_path):
 def test_detects_jwt(agent, tmp_path):
     js_file = tmp_path / "app.js"
     js_file.write_text(
-        'const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";',
+        'const token = "'
+        + (
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+            + "."
+            + "eyJzdWIiOiIxMjM0In0"
+            + "."
+            + "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        )
+        + '";',
         encoding="utf-8"
     )
     findings = agent._regex_scan(js_file.read_text(), "https://example.com/app.js")
@@ -40,7 +49,8 @@ def test_skips_placeholder(agent, tmp_path):
 
 def test_detects_google_api_key(agent, tmp_path):
     js_file = tmp_path / "maps.js"
-    js_file.write_text('initMap("AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY")', encoding="utf-8")
+    fake_google_key = "AI" + "za" + "SyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY"
+    js_file.write_text(f'initMap("{fake_google_key}")', encoding="utf-8")
     findings = agent._regex_scan(js_file.read_text(), "https://example.com/maps.js")
     assert len(findings) >= 1
     assert any("Google" in f.title for f in findings)

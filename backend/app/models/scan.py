@@ -65,6 +65,9 @@ class Scan(Base):
     )
     resources: Mapped[list["Resource"]] = relationship("Resource", back_populates="scan", cascade="all, delete-orphan")
     findings: Mapped[list["Finding"]] = relationship("Finding", back_populates="scan", cascade="all, delete-orphan")
+    evidence_artifacts: Mapped[list["FindingEvidenceArtifact"]] = relationship(
+        "FindingEvidenceArtifact", back_populates="scan", cascade="all, delete-orphan"
+    )
     reports: Mapped[list["Report"]] = relationship("Report", back_populates="scan", cascade="all, delete-orphan")
 
 

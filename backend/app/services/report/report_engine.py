@@ -11,7 +11,7 @@ import structlog
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.core.config import get_settings
-from app.models.finding import Finding, Severity, TriageStatus
+from app.models.finding import EvidenceArtifactType, Finding, FindingEvidenceArtifact, Severity, TriageStatus
 from app.models.resource import ResourceType
 from app.models.report import ReportFormat, ReportType
 from app.models.scan import Scan
@@ -48,7 +48,7 @@ class ReportEngine:
         if fmt == ReportFormat.JSON:
             return self._write_json(context)
         elif fmt == ReportFormat.MARKDOWN:
-            return self._write_markdown(context)
+            return self._write_markdown(context, report_type)
         elif fmt == ReportFormat.HTML:
             return self._write_html(context, report_type)
         elif fmt == ReportFormat.PDF:
@@ -79,11 +79,30 @@ class ReportEngine:
             if f.title.lower().startswith("api endpoint") and f.affected_url
         ]
         source_maps = [r for r in resources if r.resource_type == ResourceType.SOURCE_MAP or r.url.endswith(".map")]
+        artifacts = list(getattr(self.scan, "evidence_artifacts", []) or [])
+        if not artifacts:
+            for finding in self.findings:
+                artifacts.extend(getattr(finding, "evidence_artifacts", []) or [])
+        artifact_index = [self._artifact_payload(artifact) for artifact in artifacts]
+        artifacts_by_finding = self._artifacts_by_finding(artifact_index)
+        finding_confidence = {str(f.id): self._finding_confidence(f) for f in sorted_findings}
+        finding_auth_context = {
+            str(f.id): self._finding_auth_context(f, artifacts_by_finding.get(str(f.id), []))
+            for f in sorted_findings
+        }
+        finding_verification_required = {
+            str(f.id): self._finding_verification_required(f, artifacts_by_finding.get(str(f.id), []))
+            for f in sorted_findings
+        }
+        finding_status_phrase = {str(f.id): self._finding_status_phrase(f) for f in sorted_findings}
+        confidence_counts = self._build_confidence_counts(finding_confidence)
 
         return {
             "scan": self.scan,
             "target_url": self.scan.target_url,
             "scan_id": str(self.scan.id),
+            "project_name": getattr(getattr(self.scan, "project", None), "name", "N/A"),
+            "auth_method": self._scan_auth_method(),
             "report_type": report_type.value,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "findings": sorted_findings,
@@ -95,6 +114,7 @@ class ReportEngine:
             "triage_counts": triage_counts,
             "recurrence_counts": recurrence_counts,
             "severity_counts": counts,
+            "confidence_counts": confidence_counts,
             "pages": pages,
             "resources": resources,
             "js_files": js_files,
@@ -106,6 +126,21 @@ class ReportEngine:
             "kisa_categories": self._build_kisa_categories(),
             "executive_summary": self._build_executive_summary(counts, risk_score),
             "cross_scan_diff": self.cross_scan_diff,
+            "artifacts": artifacts,
+            "artifact_index": artifact_index,
+            "artifacts_by_finding": artifacts_by_finding,
+            "evidence_summary": self._build_evidence_summary(artifacts),
+            "finding_confidence": finding_confidence,
+            "finding_auth_context": finding_auth_context,
+            "finding_verification_required": finding_verification_required,
+            "finding_status_phrase": finding_status_phrase,
+            "authenticated_findings_count": sum(1 for value in finding_auth_context.values() if value == "authenticated"),
+            "kisa_report_metadata": self._build_kisa_report_metadata(
+                triage_counts=triage_counts,
+                recurrence_counts=recurrence_counts,
+                evidence_count=len(artifacts),
+                authenticated_findings_count=sum(1 for value in finding_auth_context.values() if value == "authenticated"),
+            ),
         }
 
     def _calculate_risk_score(self) -> float:
@@ -130,6 +165,91 @@ class ReportEngine:
             "recurring_findings_count": len(recurring),
             "previously_verified_count": sum(1 for f in self.findings if self._bool_meta(f, "previously_verified")),
             "previously_false_positive_count": sum(1 for f in self.findings if self._bool_meta(f, "previously_marked_false_positive")),
+        }
+
+    def _scan_auth_method(self) -> str:
+        session = getattr(self.scan, "session", None)
+        method = getattr(session, "auth_method", None)
+        return getattr(method, "value", None) or "none"
+
+    @staticmethod
+    def _finding_confidence(finding: Finding) -> str:
+        evidence = finding.evidence or {}
+        confidence = evidence.get("confidence") or evidence.get("confidence_level")
+        if confidence:
+            return str(confidence).lower()
+        title = (finding.title or "").lower()
+        if title.startswith("api endpoint"):
+            return "candidate"
+        status = ReportEngine._triage_status_value(finding)
+        if status == TriageStatus.VERIFIED.value:
+            return "high"
+        if status == TriageStatus.FALSE_POSITIVE.value:
+            return "none"
+        return "medium"
+
+    @staticmethod
+    def _build_confidence_counts(finding_confidence: dict[str, str]) -> dict[str, int]:
+        counts = {"high": 0, "medium": 0, "low": 0, "candidate": 0, "none": 0}
+        for confidence in finding_confidence.values():
+            counts[confidence] = counts.get(confidence, 0) + 1
+        return counts
+
+    def _finding_auth_context(self, finding: Finding, artifacts: list[dict]) -> str:
+        if any(artifact.get("auth_context") == "authenticated" for artifact in artifacts):
+            return "authenticated"
+        evidence_auth = (finding.evidence or {}).get("auth_context")
+        if evidence_auth:
+            return str(evidence_auth)
+        return "authenticated" if self._scan_auth_method() != "none" else "anonymous"
+
+    @staticmethod
+    def _finding_verification_required(finding: Finding, artifacts: list[dict]) -> bool:
+        if ReportEngine._triage_status_value(finding) == TriageStatus.VERIFIED.value:
+            return bool((finding.evidence or {}).get("verification_required", False))
+        if ReportEngine._triage_status_value(finding) == TriageStatus.FALSE_POSITIVE.value:
+            return False
+        return bool((finding.evidence or {}).get("verification_required", True)) or any(
+            artifact.get("verification_required") for artifact in artifacts
+        )
+
+    @staticmethod
+    def _finding_status_phrase(finding: Finding) -> str:
+        status = ReportEngine._triage_status_value(finding)
+        title = (finding.title or "").lower()
+        if status == TriageStatus.VERIFIED.value:
+            return "취약점이 확인되었습니다."
+        if status == TriageStatus.FALSE_POSITIVE.value:
+            return "검토 결과 오탐으로 분류되었습니다."
+        if title.startswith("api endpoint"):
+            return "추가 권한 검증이 필요한 API 노출 후보입니다."
+        return "취약 가능성이 확인되었습니다."
+
+    def _build_kisa_report_metadata(
+        self,
+        triage_counts: dict[str, int],
+        recurrence_counts: dict[str, int],
+        evidence_count: int,
+        authenticated_findings_count: int,
+    ) -> dict:
+        return {
+            "target_url": self.scan.target_url,
+            "project_name": getattr(getattr(self.scan, "project", None), "name", "N/A"),
+            "scan_id": str(self.scan.id),
+            "scope": self.scan.target_url,
+            "limitations": [
+                "서버 내부 원본 소스코드는 자동 수집하지 않으며 브라우저에서 접근 가능한 리소스와 API 흐름을 기준으로 분석합니다.",
+                "자동 탐지 결과는 검증 필요 후보이며, 권한 우회 또는 실제 악용 가능성은 별도 수동 검증이 필요합니다.",
+                "보고서와 증적 preview에는 민감정보 원문을 저장하지 않고 redaction 결과만 포함합니다.",
+            ],
+            "auth_method": self._scan_auth_method(),
+            "verified_findings_count": triage_counts.get("verified", 0),
+            "candidate_findings_count": triage_counts.get("candidate", 0),
+            "false_positive_count": triage_counts.get("false_positive", 0),
+            "recurring_findings_count": recurrence_counts.get("recurring_findings_count", 0),
+            "authenticated_findings_count": authenticated_findings_count,
+            "evidence_artifacts_count": evidence_count,
+            "redaction_applied": True,
         }
 
     @staticmethod
@@ -199,6 +319,52 @@ class ReportEngine:
             "The overall risk posture is acceptable, though continued monitoring is recommended."
         )
 
+    @staticmethod
+    def _artifact_payload(artifact: FindingEvidenceArtifact) -> dict:
+        return {
+            "id": str(artifact.id),
+            "finding_id": str(artifact.finding_id) if artifact.finding_id else None,
+            "artifact_type": artifact.artifact_type.value,
+            "title": artifact.title,
+            "description": artifact.description,
+            "file_path": artifact.file_path,
+            "url": artifact.url,
+            "http_method": artifact.http_method,
+            "status_code": artifact.status_code,
+            "content_type": artifact.content_type,
+            "content_hash": artifact.content_hash,
+            "redacted_body_preview": artifact.redacted_body_preview,
+            "line_start": artifact.line_start,
+            "line_end": artifact.line_end,
+            "storage_type": artifact.storage_type,
+            "storage_key": artifact.storage_key,
+            "redacted_value": artifact.redacted_value,
+            "screenshot_path": artifact.screenshot_path,
+            "auth_context": artifact.auth_context,
+            "verification_required": artifact.verification_required,
+            "metadata": artifact.extra_metadata,
+            "created_at": artifact.created_at,
+        }
+
+    @staticmethod
+    def _build_evidence_summary(artifacts: list[FindingEvidenceArtifact]) -> dict[str, int]:
+        return {
+            "total_artifacts_count": len(artifacts),
+            "screenshot_artifacts_count": sum(1 for a in artifacts if a.artifact_type == EvidenceArtifactType.SCREENSHOT),
+            "api_flow_artifacts_count": sum(1 for a in artifacts if a.artifact_type == EvidenceArtifactType.API_FLOW),
+            "source_file_artifacts_count": sum(1 for a in artifacts if a.artifact_type == EvidenceArtifactType.SOURCE_FILE),
+            "authenticated_artifacts_count": sum(1 for a in artifacts if a.auth_context == "authenticated"),
+        }
+
+    @staticmethod
+    def _artifacts_by_finding(artifact_index: list[dict]) -> dict[str, list[dict]]:
+        grouped: dict[str, list[dict]] = {}
+        for artifact in artifact_index:
+            finding_id = artifact.get("finding_id")
+            if finding_id:
+                grouped.setdefault(finding_id, []).append(artifact)
+        return grouped
+
     def _write_json(self, ctx: dict) -> Path:
         output = {
             "scan_id": ctx["scan_id"],
@@ -216,6 +382,8 @@ class ReportEngine:
                 "accepted_risk_count": ctx["triage_counts"].get("accepted_risk", 0),
             },
             "recurrence_summary": ctx["recurrence_counts"],
+            "evidence_summary": ctx["evidence_summary"],
+            "kisa_report_metadata": ctx["kisa_report_metadata"],
             "executive_summary": ctx["executive_summary"],
             "collection": {
                 "page_count": len(ctx["pages"]),
@@ -258,16 +426,25 @@ class ReportEngine:
                     "previous_finding_id": (f.evidence or {}).get("previous_finding_id"),
                     "previously_verified": self._bool_meta(f, "previously_verified"),
                     "previously_marked_false_positive": self._bool_meta(f, "previously_marked_false_positive"),
+                    "confidence": ctx["finding_confidence"].get(str(f.id)),
+                    "auth_context": ctx["finding_auth_context"].get(str(f.id)),
+                    "verification_required": ctx["finding_verification_required"].get(str(f.id)),
+                    "status_phrase": ctx["finding_status_phrase"].get(str(f.id)),
+                    "artifact_count": len(ctx["artifacts_by_finding"].get(str(f.id), [])),
+                    "artifacts": ctx["artifacts_by_finding"].get(str(f.id), []),
                 }
                 for f in ctx["findings"]
             ],
+            "artifacts": ctx["artifact_index"],
             "cross_scan_diff": self._json_cross_scan_diff(ctx["cross_scan_diff"]),
         }
         path = self.output_dir / f"report_{ctx['scan_id'][:8]}.json"
         path.write_text(json.dumps(output, indent=2, default=str), encoding="utf-8")
         return path
 
-    def _write_markdown(self, ctx: dict) -> Path:
+    def _write_markdown(self, ctx: dict, report_type: ReportType) -> Path:
+        if report_type == ReportType.KISA:
+            return self._write_kisa_markdown(ctx)
         lines = [
             f"# Security Assessment Report",
             f"",
@@ -281,6 +458,7 @@ class ReportEngine:
             f"**Candidate Findings:** {ctx['triage_counts'].get('candidate', 0)}  ",
             f"**New Findings:** {ctx['recurrence_counts']['new_findings_count']}  ",
             f"**Recurring Findings:** {ctx['recurrence_counts']['recurring_findings_count']}  ",
+            f"**Evidence Artifacts:** {ctx['evidence_summary']['total_artifacts_count']}  ",
             f"",
             f"## Executive Summary",
             f"",
@@ -319,6 +497,19 @@ class ReportEngine:
             f"| Recurring | {ctx['recurrence_counts']['recurring_findings_count']} |",
             f"| Previously Verified | {ctx['recurrence_counts']['previously_verified_count']} |",
             f"| Previously False Positive | {ctx['recurrence_counts']['previously_false_positive_count']} |",
+        ]
+
+        lines += [
+            "",
+            "## Evidence Artifact Summary",
+            "",
+            "| Metric | Count |",
+            "|---|---|",
+            f"| Total | {ctx['evidence_summary']['total_artifacts_count']} |",
+            f"| Screenshots | {ctx['evidence_summary']['screenshot_artifacts_count']} |",
+            f"| API flows | {ctx['evidence_summary']['api_flow_artifacts_count']} |",
+            f"| Source files | {ctx['evidence_summary']['source_file_artifacts_count']} |",
+            f"| Authenticated | {ctx['evidence_summary']['authenticated_artifacts_count']} |",
         ]
 
         lines += [
@@ -396,6 +587,7 @@ class ReportEngine:
 
         lines += ["", "## Security Findings", ""]
         for i, f in enumerate(ctx["security_findings"], 1):
+            finding_artifacts = ctx["artifacts_by_finding"].get(str(f.id), [])
             lines += [
                 f"### {i}. {f.title}",
                 f"",
@@ -407,6 +599,7 @@ class ReportEngine:
                 f"**Previous Triage:** {(f.evidence or {}).get('previous_triage_status') or 'N/A'}  ",
                 f"**Previously Verified:** {self._bool_meta(f, 'previously_verified')}  ",
                 f"**Previously False Positive:** {self._bool_meta(f, 'previously_marked_false_positive')}  ",
+                f"**Evidence Artifacts:** {len(finding_artifacts)}  ",
                 f"**CVSS:** {f.cvss_score or 'N/A'}  ",
                 f"**CWE:** {f.cwe_id or 'N/A'}  ",
                 f"**Reviewed At:** {f.reviewed_at or 'N/A'}  ",
@@ -428,6 +621,10 @@ class ReportEngine:
                 json.dumps(f.poc or {}, indent=2, ensure_ascii=False, default=str),
                 "```",
                 f"",
+                f"**Evidence Artifacts:**",
+                "",
+                *self._markdown_artifact_lines(finding_artifacts[:5]),
+                "",
                 f"**Reproduction Steps:**",
                 *[f"{idx}. {step}" for idx, step in enumerate(f.reproduction_steps or [], 1)],
                 f"",
@@ -459,9 +656,165 @@ class ReportEngine:
             for f in ctx["previously_false_positive_findings"]:
                 lines.append(f"- {f.title} (previous finding: {(f.evidence or {}).get('previous_finding_id') or 'N/A'})")
 
+        lines += [
+            "",
+            "## Appendix: Evidence Artifact Index",
+            "",
+            "| Type | Title | URL / Path | Hash | Auth | Finding |",
+            "|---|---|---|---|---|---|",
+            *[
+                f"| {artifact['artifact_type']} | {artifact['title']} | {artifact.get('url') or artifact.get('file_path') or artifact.get('screenshot_path') or 'N/A'} | {artifact.get('content_hash') or 'N/A'} | {artifact.get('auth_context') or 'N/A'} | {artifact.get('finding_id') or 'N/A'} |"
+                for artifact in ctx["artifact_index"][:500]
+            ],
+        ]
+
         path = self.output_dir / f"report_{ctx['scan_id'][:8]}.md"
         path.write_text("\n".join(lines), encoding="utf-8")
         return path
+
+    def _write_kisa_markdown(self, ctx: dict) -> Path:
+        lines = [
+            "# 웹 취약점 점검 결과 보고서",
+            "",
+            "## 1. 문서 정보",
+            "",
+            f"- 보고서 제목: 웹 취약점 점검 결과 보고서",
+            f"- 대상 URL: {ctx['target_url']}",
+            f"- 프로젝트명: {ctx['project_name']}",
+            f"- 스캔 ID: {ctx['scan_id']}",
+            f"- 인증 방식: {ctx['auth_method']}",
+            f"- 보고서 생성 일시: {ctx['generated_at']}",
+            "- 작성 도구: SSS",
+            "",
+            "## 2. 진단 개요",
+            "",
+            "본 보고서는 브라우저에서 접근 가능한 페이지, 정적 리소스, API 흐름, 저장소 상태를 기반으로 자동 수집한 보안 진단 후보를 정리한 문서입니다.",
+            "자동 탐지 결과는 검증 필요 후보이며, 권한 우회 또는 실제 악용 가능성은 별도 수동 검증이 필요합니다.",
+            "",
+            "## 3. Executive Summary",
+            "",
+            f"- 전체 Finding: {ctx['findings_count']}",
+            f"- Verified: {ctx['triage_counts'].get('verified', 0)}",
+            f"- Candidate: {ctx['triage_counts'].get('candidate', 0)}",
+            f"- False Positive: {ctx['triage_counts'].get('false_positive', 0)}",
+            f"- Authenticated Finding: {ctx['authenticated_findings_count']}",
+            f"- Recurring Finding: {ctx['recurrence_counts']['recurring_findings_count']}",
+            f"- Evidence Artifact: {ctx['evidence_summary']['total_artifacts_count']}",
+            "",
+            "## 4. 인증 전/후 공격 표면 비교",
+            "",
+        ]
+        diff = ctx["cross_scan_diff"]
+        if diff.get("included"):
+            lines += [
+                "Cross-scan Auth Delta가 포함되었습니다. 이 항목은 로그인 후 새롭게 관찰된 공격 표면 후보이며 권한 우회 확인 결과가 아닙니다.",
+                f"- New pages: {diff['new_pages_count']}",
+                f"- New resources: {diff['new_resources_count']}",
+                f"- New API endpoints: {diff['new_api_endpoints_count']}",
+                f"- New findings: {diff['new_findings_count']}",
+                "",
+            ]
+        else:
+            lines += ["Cross-scan Auth Delta가 포함되지 않았습니다.", ""]
+
+        lines += [
+            "## 5. 취약점 요약표",
+            "",
+            "| ID | 취약점명 | 유형 | Severity | Confidence | Triage Status | Affected URL | Auth Context | Verification Required |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+        for idx, finding in enumerate(ctx["security_findings"], 1):
+            fid = str(finding.id)
+            lines.append(
+                f"| F-{idx:03d} | {finding.title} | {finding.vulnerability_type.value} | {finding.severity.value} | "
+                f"{ctx['finding_confidence'].get(fid)} | {self._triage_status_value(finding)} | {finding.affected_url or 'N/A'} | "
+                f"{ctx['finding_auth_context'].get(fid)} | {ctx['finding_verification_required'].get(fid)} |"
+            )
+
+        lines += ["", "## 6. 취약점 상세", ""]
+        for idx, finding in enumerate(ctx["security_findings"], 1):
+            fid = str(finding.id)
+            artifacts = ctx["artifacts_by_finding"].get(fid, [])
+            lines += [
+                f"### F-{idx:03d}. {finding.title}",
+                "",
+                ctx["finding_status_phrase"].get(fid, "취약 가능성이 확인되었습니다."),
+                "",
+                f"- 설명: {finding.description}",
+                f"- 영향도: {finding.severity.value.upper()} severity로 분류되며 추가 검증 상태는 `{self._triage_status_value(finding)}`입니다.",
+                f"- 발생 위치: {finding.affected_url or 'N/A'}",
+                f"- Source/Sink: {(finding.evidence or {}).get('source_pattern') or 'N/A'} / {(finding.evidence or {}).get('sink_pattern') or 'N/A'}",
+                f"- CWE/OWASP: {finding.cwe_id or 'N/A'} / {finding.owasp_category or 'N/A'}",
+                f"- Recurrence: {finding.recurrence_count or 1}",
+                "",
+                "**증적 요약**",
+                "",
+                *self._markdown_artifact_lines(artifacts[:5]),
+                "",
+                "**PoC**",
+                "",
+                "```json",
+                json.dumps(finding.poc or {}, indent=2, ensure_ascii=False, default=str),
+                "```",
+                "",
+                "**재현 절차**",
+                "",
+                *[f"{step_idx}. {step}" for step_idx, step in enumerate(finding.reproduction_steps or [], 1)],
+                "",
+                f"**조치 방안:** {finding.recommendation}",
+                "",
+            ]
+
+        if ctx["false_positive_findings"]:
+            lines += ["## False Positive", "", "다음 항목은 검토 결과 오탐으로 분류되어 실제 취약점 조치 대상에서 제외합니다.", ""]
+            for finding in ctx["false_positive_findings"]:
+                lines.append(f"- {finding.title}: {finding.analyst_note or finding.verification_note or '오탐으로 분류됨'}")
+
+        lines += [
+            "",
+            "## 7. 증적 첨부",
+            "",
+            "민감정보 원문은 보고서에 포함하지 않으며 redaction preview, hash, path 중심으로 기록합니다.",
+            "",
+            "| Type | Title | URL / Path | Hash | Finding |",
+            "|---|---|---|---|---|",
+            *[
+                f"| {artifact['artifact_type']} | {artifact['title']} | {artifact.get('url') or artifact.get('file_path') or artifact.get('screenshot_path') or 'N/A'} | {artifact.get('content_hash') or 'N/A'} | {artifact.get('finding_id') or 'N/A'} |"
+                for artifact in ctx["artifact_index"][:500]
+            ],
+            "",
+            "## 8. 조치 우선순위",
+            "",
+            "Verified high severity, authenticated high confidence, recurring verified finding을 우선 조치합니다. False positive는 조치 대상에서 제외합니다.",
+            "",
+            "## 9. 한계 및 주의사항",
+            "",
+            "- 서버 내부 원본 소스코드는 자동 수집하지 않습니다.",
+            "- 브라우저에서 접근 가능한 리소스/API 흐름 기반 분석입니다.",
+            "- 자동 탐지 결과는 검증 필요 후보입니다.",
+            "- API endpoint exposure는 권한 우회 확인이 아니라 점검 후보입니다.",
+            "- 민감정보는 redaction 처리됩니다.",
+        ]
+
+        path = self.output_dir / f"report_{ctx['scan_id'][:8]}_kisa.md"
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _markdown_artifact_lines(artifacts: list[dict]) -> list[str]:
+        if not artifacts:
+            return ["No linked artifacts."]
+        lines: list[str] = []
+        for artifact in artifacts:
+            target = artifact.get("url") or artifact.get("file_path") or artifact.get("screenshot_path") or "N/A"
+            lines.append(
+                f"- `{artifact['artifact_type']}` {artifact['title']} - {target} "
+                f"(hash={artifact.get('content_hash') or 'N/A'}, auth={artifact.get('auth_context') or 'N/A'})"
+            )
+            preview = artifact.get("redacted_body_preview")
+            if preview:
+                lines.append(f"  Preview: `{str(preview)[:250]}`")
+        return lines
 
     @staticmethod
     def _json_cross_scan_diff(diff: dict) -> dict:
@@ -494,7 +847,7 @@ class ReportEngine:
     def _write_html(self, ctx: dict, report_type: ReportType) -> Path:
         template_name = (
             "report_kisa.html"
-            if report_type == ReportType.KISA and not ctx["cross_scan_diff"].get("included")
+            if report_type == ReportType.KISA
             else "report_full.html"
         )
         template = jinja_env.get_template(template_name)

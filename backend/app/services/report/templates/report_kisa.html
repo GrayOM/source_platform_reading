@@ -2,114 +2,225 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>웹 취약점 점검 결과 보고서 — {{ target_url }}</title>
+<title>웹 취약점 점검 결과 보고서 - {{ target_url }}</title>
 <style>
-  body { font-family: 'Malgun Gothic', '맑은 고딕', Arial, sans-serif; margin: 40px; color: #1a1a1a; font-size: 10pt; }
-  .cover { text-align: center; padding: 80px 0; border-bottom: 3px solid #003087; margin-bottom: 40px; }
-  .cover h1 { font-size: 24pt; color: #003087; margin-bottom: 12px; }
-  .cover .org { font-size: 14pt; color: #555; }
-  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 9.5pt; }
-  th { background: #003087; color: #fff; text-align: center; padding: 8px 10px; border: 1px solid #003087; }
-  td { padding: 7px 10px; border: 1px solid #ccc; vertical-align: top; }
-  .sev-critical { background: #d32f2f; color: #fff; text-align: center; font-weight: bold; }
-  .sev-high { background: #f57c00; color: #fff; text-align: center; font-weight: bold; }
-  .sev-medium { background: #f9a825; text-align: center; font-weight: bold; }
-  .sev-low { background: #388e3c; color: #fff; text-align: center; font-weight: bold; }
-  .sev-info { background: #1976d2; color: #fff; text-align: center; font-weight: bold; }
-  h2 { font-size: 14pt; color: #003087; border-bottom: 2px solid #003087; padding-bottom: 4px; margin-top: 40px; }
-  h3 { font-size: 11pt; margin-top: 20px; }
-  .finding-box { border: 1px solid #ccc; margin: 20px 0; page-break-inside: avoid; }
-  .finding-box-header { background: #f0f4ff; padding: 10px 14px; border-bottom: 1px solid #ccc; font-weight: bold; }
-  .finding-box-body { padding: 14px; }
-  pre { background: #f6f8fa; padding: 10px; font-size: 8pt; overflow-x: auto; border: 1px solid #e1e4e8; }
-  .footer { margin-top: 60px; text-align: center; color: #888; font-size: 8pt; border-top: 1px solid #ccc; padding-top: 16px; }
+  @page { margin: 18mm 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Malgun Gothic", "맑은 고딕", Arial, sans-serif; margin: 36px; color: #1f2933; font-size: 10pt; line-height: 1.65; }
+  h1, h2, h3 { color: #123b7a; page-break-after: avoid; }
+  h1 { font-size: 24pt; margin: 0 0 10px; }
+  h2 { font-size: 14pt; border-bottom: 2px solid #123b7a; padding-bottom: 5px; margin: 34px 0 12px; }
+  h3 { font-size: 11pt; margin: 18px 0 8px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; table-layout: fixed; page-break-inside: avoid; }
+  th { background: #123b7a; color: #fff; font-weight: 700; text-align: left; }
+  th, td { border: 1px solid #c9d2df; padding: 7px 9px; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }
+  code, pre { font-family: Consolas, "Courier New", monospace; overflow-wrap: anywhere; white-space: pre-wrap; word-break: break-word; }
+  pre { background: #f6f8fb; border: 1px solid #d9e2ec; padding: 10px; max-height: 320px; overflow: auto; }
+  .cover { min-height: 480px; border-bottom: 4px solid #123b7a; padding-top: 110px; margin-bottom: 34px; }
+  .subtitle { color: #52606d; font-size: 12pt; margin-top: 8px; }
+  .muted { color: #66788a; }
+  .notice { border-left: 4px solid #d97706; background: #fff7ed; padding: 10px 12px; margin: 12px 0; }
+  .redaction { border-left-color: #0f766e; background: #ecfdf5; }
+  .badge { display: inline-block; border-radius: 3px; padding: 2px 7px; font-size: 8.5pt; font-weight: 700; color: #fff; }
+  .sev-critical { background: #b91c1c; } .sev-high { background: #ea580c; } .sev-medium { background: #ca8a04; }
+  .sev-low { background: #15803d; } .sev-info { background: #2563eb; }
+  .triage-verified { background: #15803d; } .triage-false_positive { background: #64748b; }
+  .triage-candidate, .triage-needs_review { background: #2563eb; } .triage-accepted_risk, .triage-fixed { background: #7c3aed; }
+  .finding { border: 1px solid #c9d2df; margin: 18px 0; page-break-inside: avoid; }
+  .finding-header { background: #f0f5ff; border-bottom: 1px solid #c9d2df; padding: 10px 12px; font-weight: 700; }
+  .finding-body { padding: 12px; }
+  .false-positive { border-color: #94a3b8; background: #f8fafc; }
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0 18px; }
+  .summary-card { border: 1px solid #c9d2df; padding: 10px; background: #f8fbff; page-break-inside: avoid; }
+  .summary-card strong { display: block; font-size: 16pt; color: #123b7a; }
+  .footer { border-top: 1px solid #c9d2df; color: #66788a; font-size: 8pt; margin-top: 40px; padding-top: 12px; text-align: center; }
+  @media print {
+    body { margin: 0; }
+    .finding, table, pre { page-break-inside: avoid; }
+  }
 </style>
 </head>
 <body>
-
 <div class="cover">
   <h1>웹 취약점 점검 결과 보고서</h1>
-  <div class="org">{{ target_url }}</div>
-  <div class="org" style="margin-top: 8px; font-size: 11pt; color: #888;">점검일: {{ generated_at[:10] }}</div>
+  <div class="subtitle">{{ target_url }}</div>
+  <div class="subtitle">작성 도구: SSS</div>
 </div>
 
-<h2>1. 개요</h2>
+<h2>1. 문서 정보</h2>
 <table>
-  <tr><th style="width:25%">점검 대상</th><td>{{ target_url }}</td></tr>
-  <tr><th>점검 일시</th><td>{{ generated_at }}</td></tr>
-  <tr><th>위험도 점수</th><td>{{ risk_score }} / 10 ({{ risk_level }})</td></tr>
-  <tr><th>발견 취약점 수</th><td>{{ findings_count }}건</td></tr>
+  <tr><th style="width:24%">보고서 제목</th><td>웹 취약점 점검 결과 보고서</td><th style="width:24%">작성 도구</th><td>SSS</td></tr>
+  <tr><th>대상 URL</th><td colspan="3"><code>{{ target_url }}</code></td></tr>
+  <tr><th>프로젝트명</th><td>{{ project_name }}</td><th>스캔 ID</th><td><code>{{ scan_id }}</code></td></tr>
+  <tr><th>스캔 일시</th><td>{{ scan.started_at or scan.created_at }} - {{ scan.completed_at or 'N/A' }}</td><th>인증 방식</th><td>{{ auth_method }}</td></tr>
+  <tr><th>보고서 생성 일시</th><td colspan="3">{{ generated_at }}</td></tr>
 </table>
 
-<h2>2. 취약점 현황 요약</h2>
+<h2>2. 진단 개요</h2>
 <table>
-  <tr>
-    <th>심각 (Critical)</th><th>높음 (High)</th><th>보통 (Medium)</th><th>낮음 (Low)</th><th>정보 (Info)</th><th>합계</th>
-  </tr>
-  <tr>
-    <td class="sev-critical">{{ severity_counts.critical }}</td>
-    <td class="sev-high">{{ severity_counts.high }}</td>
-    <td class="sev-medium">{{ severity_counts.medium }}</td>
-    <td class="sev-low">{{ severity_counts.low }}</td>
-    <td class="sev-info">{{ severity_counts.info }}</td>
-    <td style="text-align:center; font-weight:bold;">{{ findings_count }}</td>
-  </tr>
+  <tr><th style="width:24%">진단 목적</th><td>브라우저에서 접근 가능한 웹 애플리케이션 자산과 API 흐름을 수집하여 보안 취약 가능성 및 검증 필요 항목을 식별합니다.</td></tr>
+  <tr><th>진단 범위</th><td><code>{{ target_url }}</code> 및 동일 출처에서 수집된 페이지, JavaScript/CSS/JSON/source map, API 후보, 브라우저 storage snapshot</td></tr>
+  <tr><th>수집 대상</th><td>페이지 {{ pages|length }}개, 리소스 {{ resources|length }}개, source map {{ source_maps|length }}개, evidence artifact {{ evidence_summary.total_artifacts_count }}개</td></tr>
+  <tr><th>제한 사항</th><td>서버 내부 원본 소스코드는 자동 수집하지 않으며, 브라우저에서 접근 가능한 리소스와 네트워크 흐름을 기준으로 분석합니다.</td></tr>
+  <tr><th>인증 전/후 진단</th><td>인증 방식은 {{ auth_method }}입니다. Cross-scan Auth Delta가 포함된 경우 인증 전/후 공격 표면 차이를 별도 후보로 표시합니다.</td></tr>
+</table>
+<div class="notice">자동 탐지 결과는 검증 필요 후보입니다. Candidate 항목은 취약 가능성이 확인된 상태이며, 실제 취약점 확정 여부는 수동 검증 및 업무 맥락 확인이 필요합니다.</div>
+
+<h2>3. Executive Summary</h2>
+<div class="summary-grid">
+  <div class="summary-card"><strong>{{ findings_count }}</strong>전체 Finding</div>
+  <div class="summary-card"><strong>{{ triage_counts.verified }}</strong>Verified</div>
+  <div class="summary-card"><strong>{{ triage_counts.candidate }}</strong>Candidate</div>
+  <div class="summary-card"><strong>{{ triage_counts.false_positive }}</strong>False Positive</div>
+  <div class="summary-card"><strong>{{ authenticated_findings_count }}</strong>Authenticated Finding</div>
+  <div class="summary-card"><strong>{{ recurrence_counts.recurring_findings_count }}</strong>Recurring Finding</div>
+  <div class="summary-card"><strong>{{ evidence_summary.total_artifacts_count }}</strong>Evidence Artifact</div>
+  <div class="summary-card"><strong>{{ risk_score }}</strong>Risk Score</div>
+</div>
+<table>
+  <tr><th>Severity</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>Info</th></tr>
+  <tr><td>Count</td><td>{{ severity_counts.critical }}</td><td>{{ severity_counts.high }}</td><td>{{ severity_counts.medium }}</td><td>{{ severity_counts.low }}</td><td>{{ severity_counts.info }}</td></tr>
+  <tr><th>Confidence</th><th>High</th><th>Medium</th><th>Low</th><th>Candidate</th><th>None</th></tr>
+  <tr><td>Count</td><td>{{ confidence_counts.high }}</td><td>{{ confidence_counts.medium }}</td><td>{{ confidence_counts.low }}</td><td>{{ confidence_counts.candidate }}</td><td>{{ confidence_counts.none }}</td></tr>
 </table>
 
-<h2>3. 종합 의견</h2>
-<p>{{ executive_summary }}</p>
-
-{% if kisa_categories %}
-<h2>4. KISA 항목별 취약점 현황</h2>
+<h2>4. 인증 전/후 공격 표면 비교</h2>
+{% if cross_scan_diff.included %}
+<p>Cross-scan Auth Delta가 포함되었습니다. 아래 항목은 로그인 후 새롭게 관찰된 공격 표면 후보이며, 권한 우회가 확인되었다는 의미는 아닙니다. 추가 권한 검증이 필요합니다.</p>
 <table>
-  <tr><th>점검 항목</th><th>발견 건수</th><th>최고 위험도</th></tr>
-  {% for cat, cat_findings in kisa_categories.items() %}
-  <tr>
-    <td>{{ cat }}</td>
-    <td style="text-align:center;">{{ cat_findings | length }}</td>
-    <td style="text-align:center;">{{ cat_findings[0].severity.value | upper }}</td>
-  </tr>
-  {% endfor %}
+  <tr><th>Base Scan</th><td><code>{{ cross_scan_diff.base_scan_id }}</code></td><th>Compare Scan</th><td><code>{{ cross_scan_diff.compare_scan_id }}</code></td></tr>
+  <tr><th>Auth Methods</th><td>{{ cross_scan_diff.base_auth_method }} vs {{ cross_scan_diff.compare_auth_method }}</td><th>Target</th><td><code>{{ cross_scan_diff.target_url }}</code></td></tr>
+  <tr><th>New Pages</th><td>{{ cross_scan_diff.new_pages_count }}</td><th>New Resources</th><td>{{ cross_scan_diff.new_resources_count }}</td></tr>
+  <tr><th>New API</th><td>{{ cross_scan_diff.new_api_endpoints_count }}</td><th>New Findings</th><td>{{ cross_scan_diff.new_findings_count }}</td></tr>
 </table>
+<h3>민감 Endpoint Hint</h3>
+<p>{% for hint in cross_scan_diff.sensitive_endpoint_hints %}<span class="badge triage-candidate">{{ hint }}</span> {% else %}<span class="muted">기록된 민감 endpoint hint가 없습니다.</span>{% endfor %}</p>
+{% else %}
+<p class="muted">Cross-scan Auth Delta가 포함되지 않았습니다.</p>
 {% endif %}
 
-<h2>5. 취약점 상세</h2>
-{% for finding in findings %}
-<div class="finding-box">
-  <div class="finding-box-header">
-    [{{ loop.index }}] {{ finding.title }}
-    &nbsp;&nbsp;
-    <span class="sev-{{ finding.severity.value }}" style="padding: 2px 10px; font-size: 9pt;">{{ finding.severity.value | upper }}</span>
-  </div>
-  <div class="finding-box-body">
+<h2>5. 취약점 요약표</h2>
+<table>
+  <tr><th style="width:8%">ID</th><th>취약점명</th><th style="width:13%">유형</th><th style="width:10%">Severity</th><th style="width:10%">Confidence</th><th style="width:12%">Triage</th><th>Affected URL</th><th style="width:12%">Auth</th><th style="width:10%">검증 필요</th></tr>
+  {% for finding in security_findings %}
+  {% set fid = finding.id|string %}
+  <tr>
+    <td>F-{{ "%03d"|format(loop.index) }}</td>
+    <td>{{ finding.title }}</td>
+    <td>{{ finding.vulnerability_type.value }}</td>
+    <td><span class="badge sev-{{ finding.severity.value }}">{{ finding.severity.value }}</span></td>
+    <td>{{ finding_confidence.get(fid) }}</td>
+    <td><span class="badge triage-{{ finding.triage_status.value if finding.triage_status else 'candidate' }}">{{ finding.triage_status.value if finding.triage_status else 'candidate' }}</span></td>
+    <td><code>{{ finding.affected_url or 'N/A' }}</code></td>
+    <td>{{ finding_auth_context.get(fid) }}</td>
+    <td>{{ finding_verification_required.get(fid) }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="9">활성 취약점 후보가 없습니다.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>6. 취약점 상세</h2>
+{% for finding in security_findings %}
+{% set fid = finding.id|string %}
+<div class="finding">
+  <div class="finding-header">F-{{ "%03d"|format(loop.index) }}. {{ finding.title }} <span class="badge sev-{{ finding.severity.value }}">{{ finding.severity.value|upper }}</span> <span class="badge triage-{{ finding.triage_status.value if finding.triage_status else 'candidate' }}">{{ finding.triage_status.value if finding.triage_status else 'candidate' }}</span></div>
+  <div class="finding-body">
+    <p><strong>판정 문구:</strong> {{ finding_status_phrase.get(fid) }}</p>
     <table>
-      <tr><th style="width:20%">취약점 유형</th><td>{{ finding.vulnerability_type.value | replace('_', ' ') | upper }}</td>
-          <th style="width:20%">CVSS 점수</th><td>{{ finding.cvss_score or 'N/A' }}</td></tr>
-      <tr><th>CWE</th><td>{% if finding.cwe_id %}CWE-{{ finding.cwe_id }}{% else %}N/A{% endif %}</td>
-          <th>관련 표준</th><td>{{ finding.owasp_category or 'N/A' }}</td></tr>
-      {% if finding.affected_url %}
-      <tr><th>영향 URL</th><td colspan="3"><code>{{ finding.affected_url }}</code></td></tr>
-      {% endif %}
+      <tr><th style="width:20%">설명</th><td colspan="3">{{ finding.description }}</td></tr>
+      <tr><th>영향도</th><td>{{ finding.severity.value|upper }} severity, confidence {{ finding_confidence.get(fid) }}</td><th>발생 위치</th><td><code>{{ finding.affected_url or 'N/A' }}</code></td></tr>
+      <tr><th>Source / Sink</th><td>{{ finding.evidence.source_pattern if finding.evidence and finding.evidence.source_pattern else 'N/A' }} / {{ finding.evidence.sink_pattern if finding.evidence and finding.evidence.sink_pattern else 'N/A' }}</td><th>CWE / OWASP</th><td>{{ finding.cwe_id or 'N/A' }} / {{ finding.owasp_category or 'N/A' }}</td></tr>
+      <tr><th>Recurrence</th><td>{{ finding.recurrence_count or 1 }}회{% if finding.evidence and finding.evidence.previous_finding_id %}, previous <code>{{ finding.evidence.previous_finding_id }}</code>{% endif %}</td><th>Verification Required</th><td>{{ finding_verification_required.get(fid) }}</td></tr>
     </table>
 
-    <h3>취약점 설명</h3>
-    <p>{{ finding.description }}</p>
+    <h3>증적 요약</h3>
+    <table>
+      <tr><th>Type</th><th>Title</th><th>URL / Path</th><th>Hash</th><th>Preview</th></tr>
+      {% for artifact in artifacts_by_finding.get(fid, [])[:5] %}
+      <tr>
+        <td>{{ artifact.artifact_type }}</td>
+        <td>{{ artifact.title }}</td>
+        <td><code>{{ artifact.url or artifact.file_path or artifact.screenshot_path or 'N/A' }}</code></td>
+        <td><code>{{ artifact.content_hash or 'N/A' }}</code></td>
+        <td>{{ artifact.redacted_body_preview[:240] if artifact.redacted_body_preview else 'N/A' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5">연결된 artifact가 없습니다.</td></tr>
+      {% endfor %}
+    </table>
 
-    {% if finding.evidence and finding.evidence.code_snippet %}
-    <h3>증거 코드</h3>
-    <pre>{{ finding.evidence.code_snippet }}</pre>
-    {% endif %}
-
+    <h3>PoC</h3>
+    <pre>{{ finding.poc | tojson(indent=2) }}</pre>
+    <h3>재현 절차</h3>
+    <ol>{% for step in finding.reproduction_steps %}<li>{{ step }}</li>{% else %}<li>기록된 재현 절차가 없습니다.</li>{% endfor %}</ol>
     <h3>조치 방안</h3>
     <p>{{ finding.recommendation }}</p>
   </div>
 </div>
 {% else %}
-<p style="color: #388e3c; font-weight: bold;">취약점이 발견되지 않았습니다.</p>
+<p class="muted">활성 취약점 후보가 없습니다.</p>
 {% endfor %}
 
-<div class="footer">
-  본 보고서는 SSS Platform (Smart Security Scanner)에 의해 자동 생성되었습니다. &bull; {{ generated_at }}
+{% if false_positive_findings %}
+<h2>False Positive 분리 항목</h2>
+<p>다음 항목은 검토 결과 오탐으로 분류되었습니다. 실제 취약점 조치 대상과 분리하여 관리합니다.</p>
+{% for finding in false_positive_findings %}
+<div class="finding false-positive">
+  <div class="finding-header">{{ finding.title }} <span class="badge triage-false_positive">false_positive</span></div>
+  <div class="finding-body">
+    <p>{{ finding_status_phrase.get(finding.id|string) }}</p>
+    <table>
+      <tr><th>Severity</th><td>{{ finding.severity.value }}</td><th>Affected URL</th><td><code>{{ finding.affected_url or 'N/A' }}</code></td></tr>
+      <tr><th>Analyst Note</th><td>{{ finding.analyst_note or 'N/A' }}</td><th>Verification Note</th><td>{{ finding.verification_note or 'N/A' }}</td></tr>
+    </table>
+  </div>
 </div>
+{% endfor %}
+{% endif %}
+
+{% if previously_false_positive_findings %}
+<h2>이전 오탐 이력 후보</h2>
+<p>이 항목들은 과거 false positive로 분류된 finding과 일치합니다. 현재 스캔에서도 별도 검증이 필요합니다.</p>
+<ul>{% for finding in previously_false_positive_findings %}<li>{{ finding.title }} - previous finding <code>{{ finding.evidence.previous_finding_id if finding.evidence else 'N/A' }}</code></li>{% endfor %}</ul>
+{% endif %}
+
+<h2>7. 증적 첨부</h2>
+<div class="notice redaction">민감정보 원문은 보고서에 포함하지 않습니다. request/response body는 redacted preview만 표시하며, token/cookie/secret/password/API key/JWT-like 값은 redaction 처리됩니다.</div>
+<table>
+  <tr><th>Type</th><th>Title</th><th>URL / Path</th><th>Hash</th><th>Screenshot</th><th>Finding</th><th>Preview</th></tr>
+  {% for artifact in artifact_index[:500] %}
+  <tr>
+    <td>{{ artifact.artifact_type }}</td>
+    <td>{{ artifact.title }}</td>
+    <td><code>{{ artifact.url or artifact.file_path or artifact.screenshot_path or 'N/A' }}</code></td>
+    <td><code>{{ artifact.content_hash or 'N/A' }}</code></td>
+    <td><code>{{ artifact.screenshot_path or 'N/A' }}</code></td>
+    <td><code>{{ artifact.finding_id or 'N/A' }}</code></td>
+    <td>{{ artifact.redacted_body_preview[:240] if artifact.redacted_body_preview else artifact.redacted_value[:240] if artifact.redacted_value else 'N/A' }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7">기록된 evidence artifact가 없습니다.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>8. 조치 우선순위</h2>
+<ol>
+  <li>Verified 상태의 High 이상 severity finding을 우선 조치합니다.</li>
+  <li>Authenticated context에서 관찰된 high confidence finding을 우선 검증합니다.</li>
+  <li>Recurring verified finding은 재발 항목으로 우선 조치합니다.</li>
+  <li>False positive 항목은 실제 취약점 조치 대상에서 제외합니다.</li>
+</ol>
+
+<h2>9. 한계 및 주의사항</h2>
+<ul>
+  <li>서버 내부 원본 소스코드는 자동 수집하지 않습니다.</li>
+  <li>브라우저에서 접근 가능한 리소스/API 흐름 기반 분석입니다.</li>
+  <li>자동 탐지 결과는 검증 필요 후보입니다.</li>
+  <li>API endpoint exposure는 권한 우회 확인이 아니라 점검 후보입니다.</li>
+  <li>민감정보는 redaction 처리됩니다.</li>
+</ul>
+
+<div class="footer">본 보고서는 SSS Platform에 의해 자동 생성되었습니다. {{ generated_at }}</div>
 </body>
 </html>

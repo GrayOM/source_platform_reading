@@ -79,6 +79,10 @@ export const updateFinding = (id: string, data: object) =>
   api.patch(`/findings/${id}`, data).then((r) => r.data);
 export const updateFindingTriage = (id: string, data: object) =>
   api.patch(`/findings/${id}/triage`, data).then((r) => r.data);
+export const getFindingArtifacts = (finding_id: string) =>
+  api.get(`/findings/${finding_id}/artifacts`).then((r) => r.data);
+export const getScanArtifacts = (scan_id: string, params?: { artifact_type?: string; auth_context?: string }) =>
+  api.get(`/scans/${scan_id}/artifacts`, { params }).then((r) => r.data);
 
 // Reports
 export const getScanReports = (scan_id: string) =>

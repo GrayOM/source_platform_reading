@@ -8,8 +8,10 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import DB, CurrentUser
 from app.core.security import validate_target_url
+from app.models.finding import EvidenceArtifactType, FindingEvidenceArtifact
 from app.models.project import Project
 from app.models.scan import AuthMethod, Scan, ScanSession, ScanStatus
+from app.schemas.evidence import EvidenceArtifactOut
 from app.schemas.scan import AuthConfig, ScanCreate, ScanOut
 from app.services.scan_diff import build_cross_scan_diff, normalized_origin, scan_auth_method
 from app.workers.scan_worker import orchestrate_scan
@@ -156,6 +158,24 @@ async def compare_scans(payload: dict, current_user: CurrentUser, db: DB) -> dic
 @router.get("/{scan_id}", response_model=ScanOut)
 async def get_scan(scan_id: uuid.UUID, current_user: CurrentUser, db: DB) -> Scan:
     return await _get_scan_or_404(scan_id, current_user, db)
+
+
+@router.get("/{scan_id}/artifacts", response_model=list[EvidenceArtifactOut])
+async def list_scan_artifacts(
+    scan_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DB,
+    artifact_type: Annotated[EvidenceArtifactType | None, Query()] = None,
+    auth_context: Annotated[str | None, Query()] = None,
+) -> list[FindingEvidenceArtifact]:
+    await _get_scan_or_404(scan_id, current_user, db)
+    q = select(FindingEvidenceArtifact).where(FindingEvidenceArtifact.scan_id == scan_id)
+    if artifact_type:
+        q = q.where(FindingEvidenceArtifact.artifact_type == artifact_type)
+    if auth_context:
+        q = q.where(FindingEvidenceArtifact.auth_context == auth_context)
+    result = await db.execute(q.order_by(FindingEvidenceArtifact.created_at.desc()))
+    return list(result.scalars().all())
 
 
 @router.get("/{scan_id}/diff-candidates")

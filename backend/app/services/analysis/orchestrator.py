@@ -24,6 +24,7 @@ from app.services.analysis.agents.base_agent import AI_SKIP_MESSAGE, AIAnalysisS
 from app.services.analysis.agents.business_logic_analyzer import BusinessLogicAgent
 from app.services.analysis.agents.js_analyzer import JSAnalyzerAgent
 from app.services.analysis.agents.secret_detector import SecretDetectorAgent
+from app.services.evidence.artifacts import link_artifacts_for_finding
 from app.services.finding_fingerprint import generate_finding_fingerprint
 from app.services.scan_diff import normalized_origin
 
@@ -200,6 +201,9 @@ class AnalysisOrchestrator:
             )
             self.db.add(finding)
             saved.append(finding)
+        await self.db.flush()
+        for finding in saved:
+            await link_artifacts_for_finding(self.db, finding)
         await self.db.flush()
         return saved
 
