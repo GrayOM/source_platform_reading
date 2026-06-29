@@ -117,15 +117,16 @@ async def test_finding_evidence_artifact_creation_and_linking():
 
 
 def test_artifact_redaction_removes_tokens_and_secrets():
+    fake_secret = "sk_" + "live_" + ("1" * 24)
     preview = redacted_preview(
         {
             "access_token": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.signature",
-            "Authorization": "Bearer " + ("sk_" + "live_" + ("1" * 24)),
+            "Authorization": f"Bearer {fake_secret}",
             "public": "short-value",
         }
     )
     assert "eyJhbGci" not in preview
-    assert ("sk_" + "live_" + ("1" * 24)) not in preview
+    assert fake_secret not in preview
     assert "<redacted>" in preview
     assert "short-value" in preview
 

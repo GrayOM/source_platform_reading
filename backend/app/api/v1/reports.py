@@ -75,6 +75,7 @@ async def request_report(scan_id: uuid.UUID, payload: ReportRequest, current_use
         scan_id=scan_id,
         format=payload.format,
         report_type=payload.report_type,
+        report_metadata=payload.report_metadata.model_dump(mode="json", exclude_none=True) if payload.report_metadata else {},
     )
     db.add(report)
     await db.flush()
@@ -118,7 +119,14 @@ async def export_evidence_bundle(scan_id: uuid.UUID, current_user: CurrentUser, 
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Scan not yet completed")
 
     output_dir = settings.scan_data_path / str(scan.id) / "reports"
-    engine = ReportEngine(scan=scan, findings=list(scan.findings), output_dir=output_dir)
+    metadata_result = await db.execute(
+        select(Report)
+        .where(Report.scan_id == scan.id)
+        .order_by(Report.created_at.desc())
+    )
+    metadata_report = next((report for report in metadata_result.scalars().all() if report.report_metadata), None)
+    report_metadata = metadata_report.report_metadata if metadata_report else {}
+    engine = ReportEngine(scan=scan, findings=list(scan.findings), output_dir=output_dir, report_metadata=report_metadata)
     json_report = engine.generate(ReportFormat.JSON, ReportType.FULL)
     markdown_report = engine.generate(ReportFormat.MARKDOWN, ReportType.FULL)
     html_report = engine.generate(ReportFormat.HTML, ReportType.FULL)
@@ -127,10 +135,12 @@ async def export_evidence_bundle(scan_id: uuid.UUID, current_user: CurrentUser, 
     ctx = engine._build_context(ReportType.FULL)
     artifact_index_path = output_dir / "artifact_index.json"
     artifact_index_path.write_text(json.dumps(ctx["artifact_index"], indent=2, default=str), encoding="utf-8")
+    report_metadata_path = output_dir / "report_metadata.json"
+    report_metadata_path.write_text(json.dumps(ctx["report_metadata"], indent=2, ensure_ascii=False, default=str), encoding="utf-8")
 
     bundle_path = output_dir / f"evidence_bundle_{str(scan.id)[:8]}.zip"
     with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for path in (json_report, markdown_report, html_report, artifact_index_path):
+        for path in (json_report, markdown_report, html_report, artifact_index_path, report_metadata_path):
             zf.write(path, arcname=path.name)
         zf.write(kisa_html_report, arcname="kisa_report.html")
         zf.write(kisa_markdown_report, arcname="kisa_summary.md")

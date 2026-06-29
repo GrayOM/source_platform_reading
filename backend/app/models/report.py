@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -31,6 +31,7 @@ class Report(Base):
     scan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scans.id"), nullable=False, index=True)
     format: Mapped[ReportFormat] = mapped_column(Enum(ReportFormat), nullable=False)
     report_type: Mapped[ReportType] = mapped_column(Enum(ReportType), nullable=False)
+    report_metadata: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     file_size: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(

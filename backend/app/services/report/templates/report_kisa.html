@@ -42,31 +42,41 @@
 </head>
 <body>
 <div class="cover">
-  <h1>웹 취약점 점검 결과 보고서</h1>
-  <div class="subtitle">{{ target_url }}</div>
+  <h1>{{ report_metadata.report_title }}</h1>
+  <div class="subtitle">{{ report_metadata.client_name or target_url }}</div>
+  <div class="subtitle">{{ report_metadata.service_name }}</div>
   <div class="subtitle">작성 도구: SSS</div>
 </div>
 
 <h2>1. 문서 정보</h2>
 <table>
-  <tr><th style="width:24%">보고서 제목</th><td>웹 취약점 점검 결과 보고서</td><th style="width:24%">작성 도구</th><td>SSS</td></tr>
+  <tr><th style="width:24%">보고서 제목</th><td>{{ report_metadata.report_title }}</td><th style="width:24%">작성 도구</th><td>SSS</td></tr>
+  <tr><th>고객사</th><td>{{ report_metadata.client_name or 'N/A' }}</td><th>서비스명</th><td>{{ report_metadata.service_name or 'N/A' }}</td></tr>
+  <tr><th>작성 기관</th><td>{{ report_metadata.organization_name or 'N/A' }}</td><th>문서 분류</th><td>{{ report_metadata.classification or 'N/A' }}</td></tr>
+  <tr><th>작성자</th><td>{{ report_metadata.author or 'N/A' }}</td><th>검토자</th><td>{{ report_metadata.reviewer or 'N/A' }}</td></tr>
+  <tr><th>문서 버전</th><td>{{ report_metadata.document_version or 'N/A' }}</td><th>보고서 번호</th><td>{{ report_metadata.report_id or 'N/A' }}</td></tr>
   <tr><th>대상 URL</th><td colspan="3"><code>{{ target_url }}</code></td></tr>
   <tr><th>프로젝트명</th><td>{{ project_name }}</td><th>스캔 ID</th><td><code>{{ scan_id }}</code></td></tr>
+  <tr><th>진단 기간</th><td>{{ report_metadata.assessment_start_date or 'N/A' }} - {{ report_metadata.assessment_end_date or 'N/A' }}</td><th>작성일</th><td>{{ report_metadata.prepared_date or 'N/A' }}</td></tr>
   <tr><th>스캔 일시</th><td>{{ scan.started_at or scan.created_at }} - {{ scan.completed_at or 'N/A' }}</td><th>인증 방식</th><td>{{ auth_method }}</td></tr>
   <tr><th>보고서 생성 일시</th><td colspan="3">{{ generated_at }}</td></tr>
+  <tr><th>연락처</th><td colspan="3">{{ report_metadata.contact or 'N/A' }}</td></tr>
 </table>
 
 <h2>2. 진단 개요</h2>
 <table>
   <tr><th style="width:24%">진단 목적</th><td>브라우저에서 접근 가능한 웹 애플리케이션 자산과 API 흐름을 수집하여 보안 취약 가능성 및 검증 필요 항목을 식별합니다.</td></tr>
-  <tr><th>진단 범위</th><td><code>{{ target_url }}</code> 및 동일 출처에서 수집된 페이지, JavaScript/CSS/JSON/source map, API 후보, 브라우저 storage snapshot</td></tr>
+  <tr><th>진단 범위</th><td>{{ report_metadata.assessment_scope }}</td></tr>
+  <tr><th>제외 범위</th><td>{% for item in report_metadata.out_of_scope %}{{ item }}{% if not loop.last %}<br>{% endif %}{% else %}N/A{% endfor %}</td></tr>
+  <tr><th>진단 방법론</th><td>{% for item in report_metadata.methodology %}{{ item }}{% if not loop.last %}<br>{% endif %}{% else %}N/A{% endfor %}</td></tr>
   <tr><th>수집 대상</th><td>페이지 {{ pages|length }}개, 리소스 {{ resources|length }}개, source map {{ source_maps|length }}개, evidence artifact {{ evidence_summary.total_artifacts_count }}개</td></tr>
-  <tr><th>제한 사항</th><td>서버 내부 원본 소스코드는 자동 수집하지 않으며, 브라우저에서 접근 가능한 리소스와 네트워크 흐름을 기준으로 분석합니다.</td></tr>
+  <tr><th>제한 사항</th><td>{% for item in report_metadata.limitations %}{{ item }}{% if not loop.last %}<br>{% endif %}{% else %}N/A{% endfor %}</td></tr>
   <tr><th>인증 전/후 진단</th><td>인증 방식은 {{ auth_method }}입니다. Cross-scan Auth Delta가 포함된 경우 인증 전/후 공격 표면 차이를 별도 후보로 표시합니다.</td></tr>
 </table>
 <div class="notice">자동 탐지 결과는 검증 필요 후보입니다. Candidate 항목은 취약 가능성이 확인된 상태이며, 실제 취약점 확정 여부는 수동 검증 및 업무 맥락 확인이 필요합니다.</div>
 
 <h2>3. Executive Summary</h2>
+{% if report_metadata.executive_summary_note %}<p>{{ report_metadata.executive_summary_note }}</p>{% endif %}
 <div class="summary-grid">
   <div class="summary-card"><strong>{{ findings_count }}</strong>전체 Finding</div>
   <div class="summary-card"><strong>{{ triage_counts.verified }}</strong>Verified</div>
@@ -83,6 +93,10 @@
   <tr><th>Confidence</th><th>High</th><th>Medium</th><th>Low</th><th>Candidate</th><th>None</th></tr>
   <tr><td>Count</td><td>{{ confidence_counts.high }}</td><td>{{ confidence_counts.medium }}</td><td>{{ confidence_counts.low }}</td><td>{{ confidence_counts.candidate }}</td><td>{{ confidence_counts.none }}</td></tr>
 </table>
+{% if report_metadata.custom_notes %}
+<h3>Custom Notes</h3>
+<p>{{ report_metadata.custom_notes }}</p>
+{% endif %}
 
 <h2>4. 인증 전/후 공격 표면 비교</h2>
 {% if cross_scan_diff.included %}

@@ -35,10 +35,12 @@ class ReportEngine:
         findings: list[Finding],
         output_dir: Path,
         cross_scan_diff: dict | None = None,
+        report_metadata: dict | None = None,
     ):
         self.scan = scan
         self.findings = findings
         self.cross_scan_diff = cross_scan_diff or not_included_cross_scan_diff()
+        self.report_metadata = report_metadata or {}
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -85,6 +87,7 @@ class ReportEngine:
                 artifacts.extend(getattr(finding, "evidence_artifacts", []) or [])
         artifact_index = [self._artifact_payload(artifact) for artifact in artifacts]
         artifacts_by_finding = self._artifacts_by_finding(artifact_index)
+        report_metadata = self._build_report_metadata()
         finding_confidence = {str(f.id): self._finding_confidence(f) for f in sorted_findings}
         finding_auth_context = {
             str(f.id): self._finding_auth_context(f, artifacts_by_finding.get(str(f.id), []))
@@ -103,6 +106,7 @@ class ReportEngine:
             "scan_id": str(self.scan.id),
             "project_name": getattr(getattr(self.scan, "project", None), "name", "N/A"),
             "auth_method": self._scan_auth_method(),
+            "report_metadata": report_metadata,
             "report_type": report_type.value,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "findings": sorted_findings,
@@ -136,6 +140,7 @@ class ReportEngine:
             "finding_status_phrase": finding_status_phrase,
             "authenticated_findings_count": sum(1 for value in finding_auth_context.values() if value == "authenticated"),
             "kisa_report_metadata": self._build_kisa_report_metadata(
+                report_metadata=report_metadata,
                 triage_counts=triage_counts,
                 recurrence_counts=recurrence_counts,
                 evidence_count=len(artifacts),
@@ -195,6 +200,45 @@ class ReportEngine:
             counts[confidence] = counts.get(confidence, 0) + 1
         return counts
 
+    def _build_report_metadata(self) -> dict:
+        metadata = dict(self.report_metadata or {})
+        started_at = getattr(self.scan, "started_at", None)
+        completed_at = getattr(self.scan, "completed_at", None)
+        defaults = {
+            "report_title": "웹 취약점 점검 결과 보고서",
+            "client_name": "",
+            "service_name": self.scan.target_url,
+            "organization_name": "",
+            "author": "",
+            "reviewer": "",
+            "document_version": "1.0",
+            "report_id": str(self.scan.id)[:8],
+            "classification": "Internal",
+            "assessment_start_date": str(started_at.date()) if started_at else "",
+            "assessment_end_date": str(completed_at.date()) if completed_at else "",
+            "assessment_scope": "브라우저에서 접근 가능한 웹 리소스 및 API 흐름",
+            "out_of_scope": [],
+            "methodology": [
+                "브라우저 기반 페이지 및 리소스 수집",
+                "정적 리소스와 API 흐름 기반 자동 분석",
+                "Finding triage 및 evidence artifact 기반 보고서 작성",
+            ],
+            "limitations": [
+                "서버 내부 원본 소스코드는 자동 수집하지 않음",
+                "자동 탐지 결과는 검증 필요 후보이며 수동 검증이 필요함",
+                "민감정보 원문은 redaction 처리됨",
+            ],
+            "contact": "",
+            "prepared_date": datetime.now(timezone.utc).date().isoformat(),
+            "executive_summary_note": "",
+            "remediation_due_date": "",
+            "custom_notes": "",
+        }
+        for key, value in defaults.items():
+            if key not in metadata or metadata[key] in (None, "", []):
+                metadata[key] = value
+        return metadata
+
     def _finding_auth_context(self, finding: Finding, artifacts: list[dict]) -> str:
         if any(artifact.get("auth_context") == "authenticated" for artifact in artifacts):
             return "authenticated"
@@ -227,6 +271,7 @@ class ReportEngine:
 
     def _build_kisa_report_metadata(
         self,
+        report_metadata: dict,
         triage_counts: dict[str, int],
         recurrence_counts: dict[str, int],
         evidence_count: int,
@@ -236,12 +281,15 @@ class ReportEngine:
             "target_url": self.scan.target_url,
             "project_name": getattr(getattr(self.scan, "project", None), "name", "N/A"),
             "scan_id": str(self.scan.id),
-            "scope": self.scan.target_url,
-            "limitations": [
-                "서버 내부 원본 소스코드는 자동 수집하지 않으며 브라우저에서 접근 가능한 리소스와 API 흐름을 기준으로 분석합니다.",
-                "자동 탐지 결과는 검증 필요 후보이며, 권한 우회 또는 실제 악용 가능성은 별도 수동 검증이 필요합니다.",
-                "보고서와 증적 preview에는 민감정보 원문을 저장하지 않고 redaction 결과만 포함합니다.",
-            ],
+            "report_title": report_metadata.get("report_title"),
+            "client_name": report_metadata.get("client_name"),
+            "service_name": report_metadata.get("service_name"),
+            "document_version": report_metadata.get("document_version"),
+            "classification": report_metadata.get("classification"),
+            "assessment_start_date": report_metadata.get("assessment_start_date"),
+            "assessment_end_date": report_metadata.get("assessment_end_date"),
+            "scope": report_metadata.get("assessment_scope") or self.scan.target_url,
+            "limitations": report_metadata.get("limitations") or [],
             "auth_method": self._scan_auth_method(),
             "verified_findings_count": triage_counts.get("verified", 0),
             "candidate_findings_count": triage_counts.get("candidate", 0),
@@ -372,6 +420,7 @@ class ReportEngine:
             "generated_at": ctx["generated_at"],
             "risk_score": ctx["risk_score"],
             "risk_level": ctx["risk_level"],
+            "report_metadata": ctx["report_metadata"],
             "severity_counts": ctx["severity_counts"],
             "triage_summary": {
                 "verified_findings_count": ctx["triage_counts"].get("verified", 0),
@@ -459,6 +508,19 @@ class ReportEngine:
             f"**New Findings:** {ctx['recurrence_counts']['new_findings_count']}  ",
             f"**Recurring Findings:** {ctx['recurrence_counts']['recurring_findings_count']}  ",
             f"**Evidence Artifacts:** {ctx['evidence_summary']['total_artifacts_count']}  ",
+            f"",
+            f"## Report Metadata",
+            f"",
+            f"**Report Title:** {ctx['report_metadata'].get('report_title') or 'N/A'}  ",
+            f"**Client:** {ctx['report_metadata'].get('client_name') or 'N/A'}  ",
+            f"**Service:** {ctx['report_metadata'].get('service_name') or 'N/A'}  ",
+            f"**Organization:** {ctx['report_metadata'].get('organization_name') or 'N/A'}  ",
+            f"**Author:** {ctx['report_metadata'].get('author') or 'N/A'}  ",
+            f"**Reviewer:** {ctx['report_metadata'].get('reviewer') or 'N/A'}  ",
+            f"**Document Version:** {ctx['report_metadata'].get('document_version') or 'N/A'}  ",
+            f"**Classification:** {ctx['report_metadata'].get('classification') or 'N/A'}  ",
+            f"**Assessment Period:** {ctx['report_metadata'].get('assessment_start_date') or 'N/A'} - {ctx['report_metadata'].get('assessment_end_date') or 'N/A'}  ",
+            f"**Assessment Scope:** {ctx['report_metadata'].get('assessment_scope') or 'N/A'}  ",
             f"",
             f"## Executive Summary",
             f"",
@@ -679,6 +741,14 @@ class ReportEngine:
             "## 1. 문서 정보",
             "",
             f"- 보고서 제목: 웹 취약점 점검 결과 보고서",
+            f"- 문서 제목: {ctx['report_metadata'].get('report_title') or 'N/A'}",
+            f"- 고객사: {ctx['report_metadata'].get('client_name') or 'N/A'}",
+            f"- 서비스명: {ctx['report_metadata'].get('service_name') or 'N/A'}",
+            f"- 작성자: {ctx['report_metadata'].get('author') or 'N/A'}",
+            f"- 검토자: {ctx['report_metadata'].get('reviewer') or 'N/A'}",
+            f"- 문서 버전: {ctx['report_metadata'].get('document_version') or 'N/A'}",
+            f"- 분류: {ctx['report_metadata'].get('classification') or 'N/A'}",
+            f"- 보고서 번호: {ctx['report_metadata'].get('report_id') or 'N/A'}",
             f"- 대상 URL: {ctx['target_url']}",
             f"- 프로젝트명: {ctx['project_name']}",
             f"- 스캔 ID: {ctx['scan_id']}",
@@ -689,7 +759,10 @@ class ReportEngine:
             "## 2. 진단 개요",
             "",
             "본 보고서는 브라우저에서 접근 가능한 페이지, 정적 리소스, API 흐름, 저장소 상태를 기반으로 자동 수집한 보안 진단 후보를 정리한 문서입니다.",
+            f"진단 범위: {ctx['report_metadata'].get('assessment_scope') or 'N/A'}",
+            f"제외 범위: {', '.join(ctx['report_metadata'].get('out_of_scope') or []) or 'N/A'}",
             "자동 탐지 결과는 검증 필요 후보이며, 권한 우회 또는 실제 악용 가능성은 별도 수동 검증이 필요합니다.",
+            ctx["report_metadata"].get("executive_summary_note") or "",
             "",
             "## 3. Executive Summary",
             "",

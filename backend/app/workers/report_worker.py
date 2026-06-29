@@ -63,6 +63,7 @@ def generate_report(self, report_id: str, compare_scan_id: str | None = None) ->
             findings=list(findings),
             output_dir=output_dir,
             cross_scan_diff=cross_scan_diff,
+            report_metadata=report.report_metadata or {},
         )
         file_path = engine_svc.generate(report.format, report.report_type)
 

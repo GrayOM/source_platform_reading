@@ -87,8 +87,8 @@ export const getScanArtifacts = (scan_id: string, params?: { artifact_type?: str
 // Reports
 export const getScanReports = (scan_id: string) =>
   api.get(`/reports/scans/${scan_id}`).then((r) => r.data);
-export const generateReport = (scan_id: string, format: string, report_type: string, compare_scan_id?: string) =>
-  api.post(`/reports/scans/${scan_id}/generate`, { format, report_type, compare_scan_id }).then((r) => r.data);
+export const generateReport = (scan_id: string, format: string, report_type: string, compare_scan_id?: string, report_metadata?: object) =>
+  api.post(`/reports/scans/${scan_id}/generate`, { format, report_type, compare_scan_id, report_metadata }).then((r) => r.data);
 export const downloadReport = async (report_id: string) => {
   const response = await api.get(`/reports/${report_id}/download`, { responseType: "blob" });
   const disposition = response.headers["content-disposition"] ?? "";

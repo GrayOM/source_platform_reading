@@ -84,6 +84,29 @@
 <div class="content">
   <h2>Executive Summary</h2>
   <p>{{ executive_summary }}</p>
+  {% if report_metadata.executive_summary_note %}<p>{{ report_metadata.executive_summary_note }}</p>{% endif %}
+
+  <h2>Report Metadata</h2>
+  <table>
+    <tr><th>Report Title</th><td>{{ report_metadata.report_title }}</td></tr>
+    <tr><th>Client</th><td>{{ report_metadata.client_name or 'N/A' }}</td></tr>
+    <tr><th>Service</th><td>{{ report_metadata.service_name or 'N/A' }}</td></tr>
+    <tr><th>Organization</th><td>{{ report_metadata.organization_name or 'N/A' }}</td></tr>
+    <tr><th>Author</th><td>{{ report_metadata.author or 'N/A' }}</td></tr>
+    <tr><th>Reviewer</th><td>{{ report_metadata.reviewer or 'N/A' }}</td></tr>
+    <tr><th>Document Version</th><td>{{ report_metadata.document_version or 'N/A' }}</td></tr>
+    <tr><th>Report ID</th><td>{{ report_metadata.report_id or 'N/A' }}</td></tr>
+    <tr><th>Classification</th><td>{{ report_metadata.classification or 'N/A' }}</td></tr>
+    <tr><th>Assessment Period</th><td>{{ report_metadata.assessment_start_date or 'N/A' }} - {{ report_metadata.assessment_end_date or 'N/A' }}</td></tr>
+    <tr><th>Assessment Scope</th><td>{{ report_metadata.assessment_scope or 'N/A' }}</td></tr>
+    <tr><th>Out of Scope</th><td>{% for item in report_metadata.out_of_scope %}{{ item }}{% if not loop.last %}<br>{% endif %}{% else %}N/A{% endfor %}</td></tr>
+    <tr><th>Methodology</th><td>{% for item in report_metadata.methodology %}{{ item }}{% if not loop.last %}<br>{% endif %}{% else %}N/A{% endfor %}</td></tr>
+    <tr><th>Limitations</th><td>{% for item in report_metadata.limitations %}{{ item }}{% if not loop.last %}<br>{% endif %}{% else %}N/A{% endfor %}</td></tr>
+    <tr><th>Contact</th><td>{{ report_metadata.contact or 'N/A' }}</td></tr>
+    <tr><th>Prepared Date</th><td>{{ report_metadata.prepared_date or 'N/A' }}</td></tr>
+    <tr><th>Remediation Due Date</th><td>{{ report_metadata.remediation_due_date or 'N/A' }}</td></tr>
+    <tr><th>Custom Notes</th><td>{{ report_metadata.custom_notes or 'N/A' }}</td></tr>
+  </table>
 
   <h2>Assessment Overview</h2>
   <table>

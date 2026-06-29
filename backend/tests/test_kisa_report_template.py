@@ -9,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 from app.models.finding import EvidenceArtifactType, Finding, FindingEvidenceArtifact, Severity, TriageStatus, VulnType
 from app.models.project import Project
-from app.models.report import ReportFormat, ReportType
+from app.models.report import Report, ReportFormat, ReportType
 from app.models.resource import Resource, ResourceType
 from app.models.scan import AuthMethod, Scan, ScanSession, ScanStatus
 from app.services.report.report_engine import ReportEngine
@@ -146,12 +146,23 @@ def test_kisa_html_includes_cross_scan_delta_without_falling_back_to_full_templa
 
 def test_json_report_includes_kisa_report_metadata(tmp_path):
     scan, findings = _report_fixture()
-    path = ReportEngine(scan, findings, tmp_path).generate(ReportFormat.JSON, ReportType.KISA)
+    report_metadata = {
+        "report_title": "웹 애플리케이션 보안 진단 보고서",
+        "client_name": "Example Corp",
+        "service_name": "Example Partner Portal",
+        "author": "M O",
+        "document_version": "1.0",
+        "assessment_scope": "브라우저에서 접근 가능한 웹 리소스 및 API 흐름",
+    }
+    path = ReportEngine(scan, findings, tmp_path, report_metadata=report_metadata).generate(ReportFormat.JSON, ReportType.KISA)
     payload = json.loads(path.read_text(encoding="utf-8"))
 
+    assert payload["report_metadata"]["client_name"] == "Example Corp"
+    assert payload["report_metadata"]["service_name"] == "Example Partner Portal"
     metadata = payload["kisa_report_metadata"]
     assert metadata["target_url"] == scan.target_url
     assert metadata["project_name"] == "KISA Project"
+    assert metadata["client_name"] == "Example Corp"
     assert metadata["verified_findings_count"] == 1
     assert metadata["candidate_findings_count"] == 1
     assert metadata["false_positive_count"] == 1
@@ -161,13 +172,15 @@ def test_json_report_includes_kisa_report_metadata(tmp_path):
 
 def test_kisa_markdown_and_existing_full_outputs_still_generate(tmp_path):
     scan, findings = _report_fixture()
-    engine = ReportEngine(scan, findings, tmp_path)
+    engine = ReportEngine(scan, findings, tmp_path, report_metadata={"client_name": "Markdown Client"})
     kisa_md = engine.generate(ReportFormat.MARKDOWN, ReportType.KISA).read_text(encoding="utf-8")
     full_md = engine.generate(ReportFormat.MARKDOWN, ReportType.FULL).read_text(encoding="utf-8")
     full_json = json.loads(engine.generate(ReportFormat.JSON, ReportType.FULL).read_text(encoding="utf-8"))
     full_html = engine.generate(ReportFormat.HTML, ReportType.FULL).read_text(encoding="utf-8")
 
     assert "웹 취약점 점검 결과 보고서" in kisa_md
+    assert "Markdown Client" in kisa_md
+    assert "## Report Metadata" in full_md
     assert "## Security Findings" in full_md
     assert "findings" in full_json
     assert "Security Assessment Report" in full_html
@@ -196,6 +209,12 @@ async def test_evidence_bundle_contains_kisa_report_and_artifact_index(monkeypat
         project = Project(owner=user, name="Bundle Project")
         scan = Scan(id=uuid.uuid4(), project=project, target_url="https://example.com", status=ScanStatus.COMPLETED, progress=100)
         finding = _finding(scan, "Bundle verified finding", TriageStatus.VERIFIED)
+        report = Report(
+            scan=scan,
+            format=ReportFormat.HTML,
+            report_type=ReportType.KISA,
+            report_metadata={"client_name": "Bundle Client", "service_name": "Bundle Service"},
+        )
         screenshot = FindingEvidenceArtifact(
             scan=scan,
             finding=finding,
@@ -205,7 +224,7 @@ async def test_evidence_bundle_contains_kisa_report_and_artifact_index(monkeypat
             auth_context="authenticated",
         )
         (tmp_path / "shot.png").write_bytes(b"png")
-        db.add_all([user, project, scan, finding, screenshot])
+        db.add_all([user, project, scan, finding, screenshot, report])
         await db.commit()
         scan_id = scan.id
 
@@ -222,4 +241,95 @@ async def test_evidence_bundle_contains_kisa_report_and_artifact_index(monkeypat
     assert "kisa_report.html" in names
     assert "kisa_summary.md" in names
     assert "artifact_index.json" in names
+    assert "report_metadata.json" in names
     assert "screenshots/shot.png" in names
+    with zipfile.ZipFile(bundle_path) as zf:
+        metadata = json.loads(zf.read("report_metadata.json").decode("utf-8"))
+    assert metadata["client_name"] == "Bundle Client"
+
+
+@pytest.mark.asyncio
+async def test_report_metadata_api_persists_and_validates_length(monkeypatch):
+    from app.api.v1 import reports as reports_api
+    from app.core.database import AsyncSessionLocal
+    from app.models.user import User
+    from sqlalchemy import select
+
+    class DummyTask:
+        id = "metadata-report-task"
+
+    monkeypatch.setattr(reports_api.generate_report, "delay", lambda report_id, compare_scan_id=None: DummyTask())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/api/v1/auth/register",
+            json={"email": "metadata-api@example.com", "password": "strongpassword123", "full_name": "Metadata User"},
+        )
+        login = await client.post("/api/v1/auth/login", json={"email": "metadata-api@example.com", "password": "strongpassword123"})
+        token = login.json()["access_token"]
+
+    async with AsyncSessionLocal() as db:
+        user = (await db.execute(select(User).where(User.email == "metadata-api@example.com"))).scalar_one()
+        project = Project(owner=user, name="Metadata Project")
+        scan = Scan(project=project, target_url="https://example.com", status=ScanStatus.COMPLETED, progress=100)
+        db.add_all([project, scan])
+        await db.commit()
+        scan_id = scan.id
+
+    payload = {
+        "format": "html",
+        "report_type": "kisa",
+        "report_metadata": {
+            "report_title": "웹 애플리케이션 보안 진단 보고서",
+            "client_name": "Example Corp",
+            "service_name": "Partner Portal",
+            "author": "M O",
+            "document_version": "1.0",
+            "classification": "Confidential",
+            "assessment_start_date": "2026-06-01",
+            "assessment_end_date": "2026-06-02",
+            "assessment_scope": "Browser-accessible resources",
+            "limitations": ["No server source collection"],
+        },
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(f"/api/v1/reports/scans/{scan_id}/generate", json=payload, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 202
+        report_id = response.json()["id"]
+        too_long = await client.post(
+            f"/api/v1/reports/scans/{scan_id}/generate",
+            json={"format": "html", "report_type": "kisa", "report_metadata": {"client_name": "x" * 300}},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert too_long.status_code == 422
+
+    async with AsyncSessionLocal() as db:
+        report = await db.get(Report, uuid.UUID(report_id))
+        assert report is not None
+        assert report.report_metadata["client_name"] == "Example Corp"
+        assert report.report_metadata["classification"] == "Confidential"
+
+
+def test_report_metadata_renders_in_kisa_html_and_escapes_payload(tmp_path):
+    scan, findings = _report_fixture()
+    html = ReportEngine(
+        scan,
+        findings,
+        tmp_path,
+        report_metadata={
+            "client_name": "<script>alert(1)</script>",
+            "service_name": "Partner Portal",
+            "author": "M O",
+            "document_version": "2.0",
+            "assessment_scope": "Submitted browser scope",
+            "custom_notes": "<b>note</b>",
+        },
+    ).generate(ReportFormat.HTML, ReportType.KISA).read_text(encoding="utf-8")
+
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "<script>alert(1)</script>" not in html
+    assert "Partner Portal" in html
+    assert "M O" in html
+    assert "2.0" in html
+    assert "Submitted browser scope" in html
+    assert "&lt;b&gt;note&lt;/b&gt;" in html

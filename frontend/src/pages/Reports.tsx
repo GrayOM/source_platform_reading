@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { Download, FileJson, FileText, Info, Loader2, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, FileJson, FileText, Info, Loader2, Plus } from "lucide-react";
 import { useState } from "react";
 import toast from "react-hot-toast";
 import { useParams } from "react-router-dom";
-import { Badge, Button, Card, EmptyState, PageHeader, PageShell, Select } from "../components/ui";
+import { Badge, Button, Card, EmptyState, Field, PageHeader, PageShell, Select, TextArea, TextInput } from "../components/ui";
 import { downloadReport, generateReport, getDiffCandidates, getScanReports } from "../lib/api";
 
 const FORMATS = [
@@ -23,6 +23,44 @@ const TYPE_LABELS: Record<string, string> = {
   technical: "Technical Details",
 };
 
+const CLASSIFICATIONS = ["", "Public", "Internal", "Confidential", "Restricted"] as const;
+const METADATA_DEFAULTS = {
+  report_title: "",
+  client_name: "",
+  service_name: "",
+  organization_name: "",
+  author: "",
+  reviewer: "",
+  document_version: "",
+  report_id: "",
+  classification: "",
+  assessment_start_date: "",
+  assessment_end_date: "",
+  assessment_scope: "",
+  out_of_scope: "",
+  methodology: "",
+  limitations: "",
+  contact: "",
+  prepared_date: "",
+  executive_summary_note: "",
+  remediation_due_date: "",
+  custom_notes: "",
+};
+
+function buildReportMetadata(values: typeof METADATA_DEFAULTS) {
+  const metadata: Record<string, string | string[]> = {};
+  Object.entries(values).forEach(([key, value]) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    if (["out_of_scope", "methodology", "limitations"].includes(key)) {
+      metadata[key] = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    } else {
+      metadata[key] = trimmed;
+    }
+  });
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
 export function Reports() {
   const { scanId } = useParams<{ scanId: string }>();
   const qc = useQueryClient();
@@ -30,6 +68,8 @@ export function Reports() {
   const [type, setType] = useState<string>("full");
   const [compareScanId, setCompareScanId] = useState<string>("");
   const [downloadingId, setDownloadingId] = useState<string>("");
+  const [metadataOpen, setMetadataOpen] = useState(false);
+  const [metadata, setMetadata] = useState(METADATA_DEFAULTS);
 
   const { data: reports = [], isLoading } = useQuery({
     queryKey: ["reports", scanId],
@@ -47,7 +87,7 @@ export function Reports() {
   });
 
   const generateMutation = useMutation({
-    mutationFn: () => generateReport(scanId!, format, type, compareScanId || undefined),
+    mutationFn: () => generateReport(scanId!, format, type, compareScanId || undefined, buildReportMetadata(metadata)),
     onSuccess: () => {
       toast.success("Report generation started");
       qc.invalidateQueries({ queryKey: ["reports", scanId] });
@@ -128,6 +168,87 @@ export function Reports() {
               Generate
             </Button>
           </div>
+        </div>
+
+        <div className="mt-5 border-t border-slate-800 pt-5">
+          <button
+            type="button"
+            onClick={() => setMetadataOpen((value) => !value)}
+            className="flex w-full items-center justify-between rounded-lg border border-slate-800 bg-slate-950/40 px-4 py-3 text-left text-sm font-semibold text-white hover:border-slate-700"
+          >
+            <span>Advanced report metadata</span>
+            {metadataOpen ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}
+          </button>
+          {metadataOpen && (
+            <div className="mt-4 grid gap-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="Report title">
+                  <TextInput value={metadata.report_title} maxLength={255} onChange={(e) => setMetadata({ ...metadata, report_title: e.target.value })} placeholder="웹 애플리케이션 보안 진단 보고서" />
+                </Field>
+                <Field label="Client name">
+                  <TextInput value={metadata.client_name} maxLength={255} onChange={(e) => setMetadata({ ...metadata, client_name: e.target.value })} placeholder="Example Corp" />
+                </Field>
+                <Field label="Service name">
+                  <TextInput value={metadata.service_name} maxLength={255} onChange={(e) => setMetadata({ ...metadata, service_name: e.target.value })} placeholder="Partner Portal" />
+                </Field>
+                <Field label="Organization name">
+                  <TextInput value={metadata.organization_name} maxLength={255} onChange={(e) => setMetadata({ ...metadata, organization_name: e.target.value })} />
+                </Field>
+                <Field label="Author">
+                  <TextInput value={metadata.author} maxLength={255} onChange={(e) => setMetadata({ ...metadata, author: e.target.value })} />
+                </Field>
+                <Field label="Reviewer">
+                  <TextInput value={metadata.reviewer} maxLength={255} onChange={(e) => setMetadata({ ...metadata, reviewer: e.target.value })} />
+                </Field>
+                <Field label="Document version">
+                  <TextInput value={metadata.document_version} maxLength={50} onChange={(e) => setMetadata({ ...metadata, document_version: e.target.value })} placeholder="1.0" />
+                </Field>
+                <Field label="Report ID">
+                  <TextInput value={metadata.report_id} maxLength={100} onChange={(e) => setMetadata({ ...metadata, report_id: e.target.value })} />
+                </Field>
+                <Field label="Classification">
+                  <Select value={metadata.classification} onChange={(e) => setMetadata({ ...metadata, classification: e.target.value })}>
+                    {CLASSIFICATIONS.map((item) => <option key={item || "none"} value={item}>{item || "Default"}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Contact">
+                  <TextInput value={metadata.contact} maxLength={255} onChange={(e) => setMetadata({ ...metadata, contact: e.target.value })} />
+                </Field>
+                <Field label="Assessment start date">
+                  <TextInput type="date" value={metadata.assessment_start_date} onChange={(e) => setMetadata({ ...metadata, assessment_start_date: e.target.value })} />
+                </Field>
+                <Field label="Assessment end date">
+                  <TextInput type="date" value={metadata.assessment_end_date} onChange={(e) => setMetadata({ ...metadata, assessment_end_date: e.target.value })} />
+                </Field>
+                <Field label="Prepared date">
+                  <TextInput type="date" value={metadata.prepared_date} onChange={(e) => setMetadata({ ...metadata, prepared_date: e.target.value })} />
+                </Field>
+                <Field label="Remediation due date">
+                  <TextInput type="date" value={metadata.remediation_due_date} onChange={(e) => setMetadata({ ...metadata, remediation_due_date: e.target.value })} />
+                </Field>
+              </div>
+              <Field label="Assessment scope">
+                <TextArea value={metadata.assessment_scope} maxLength={4000} rows={3} onChange={(e) => setMetadata({ ...metadata, assessment_scope: e.target.value })} className="resize-y" />
+              </Field>
+              <div className="grid gap-4 md:grid-cols-3">
+                <Field label="Out of scope" hint="One item per line.">
+                  <TextArea value={metadata.out_of_scope} rows={4} onChange={(e) => setMetadata({ ...metadata, out_of_scope: e.target.value })} className="resize-y" />
+                </Field>
+                <Field label="Methodology" hint="One item per line.">
+                  <TextArea value={metadata.methodology} rows={4} onChange={(e) => setMetadata({ ...metadata, methodology: e.target.value })} className="resize-y" />
+                </Field>
+                <Field label="Limitations" hint="One item per line.">
+                  <TextArea value={metadata.limitations} rows={4} onChange={(e) => setMetadata({ ...metadata, limitations: e.target.value })} className="resize-y" />
+                </Field>
+              </div>
+              <Field label="Executive summary note">
+                <TextArea value={metadata.executive_summary_note} maxLength={4000} rows={3} onChange={(e) => setMetadata({ ...metadata, executive_summary_note: e.target.value })} className="resize-y" />
+              </Field>
+              <Field label="Custom notes">
+                <TextArea value={metadata.custom_notes} maxLength={4000} rows={3} onChange={(e) => setMetadata({ ...metadata, custom_notes: e.target.value })} className="resize-y" />
+              </Field>
+            </div>
+          )}
         </div>
       </Card>
 
