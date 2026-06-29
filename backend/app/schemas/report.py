@@ -66,6 +66,8 @@ class ReportOut(BaseModel):
     format: ReportFormat
     report_type: ReportType
     report_metadata: dict
+    report_status: str
+    error_message: str | None
     file_path: str | None
     file_size: int
     created_at: datetime

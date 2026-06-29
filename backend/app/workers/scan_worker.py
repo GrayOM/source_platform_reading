@@ -60,6 +60,11 @@ def orchestrate_scan(self: Task, scan_id: str) -> dict:
         # Persist discovered resources
         scan.pages_discovered = len(crawl_result.pages)
         scan.resources_collected = len(crawl_result.resources)
+        if getattr(crawl_result, "policy_events", None):
+            current_config = dict(scan.config or {})
+            existing_events = list(current_config.get("policy_events") or [])
+            current_config["policy_events"] = existing_events + list(crawl_result.policy_events)
+            scan.config = current_config
         scan.status = ScanStatus.ANALYZING
         scan.phase = ScanPhase.ANALYZE
         scan.progress = 40
@@ -116,9 +121,10 @@ def _run_crawl(scan, output_dir: Path):
     asyncio.set_event_loop(loop)
 
     def progress_cb(pages, resources):
+        policy = (scan.config or {}).get("scan_policy") or {}
         _publish_progress(
             str(scan.id), "crawl",
-            min(35, 5 + int(pages / max(1, scan.config.get("max_pages", 500)) * 30)),
+            min(35, 5 + int(pages / max(1, policy.get("max_pages") or scan.config.get("max_pages", 500)) * 30)),
             f"Crawling... {pages} pages, {resources} resources",
         )
 

@@ -69,12 +69,26 @@ def generate_report(self, report_id: str, compare_scan_id: str | None = None) ->
 
         report.file_path = str(file_path)
         report.file_size = file_path.stat().st_size
+        if report.format.value == "pdf" and file_path.suffix.lower() != ".pdf":
+            report.report_status = "fallback"
+            detail = engine_svc.last_pdf_error or "PDF renderer failed"
+            report.error_message = f"PDF generation failed; HTML fallback generated. {detail}"[:1000]
+        else:
+            report.report_status = "generated"
+            report.error_message = None
         db.commit()
 
         log.info("report.generated", report_id=report_id, path=str(file_path))
         return {"status": "generated", "file_path": str(file_path)}
 
     except Exception as exc:
+        try:
+            if "report" in locals() and report:
+                report.report_status = "failed"
+                report.error_message = str(exc)[:1000]
+                db.commit()
+        except Exception:
+            db.rollback()
         log.error("report.failed", report_id=report_id, error=str(exc))
         raise
     finally:

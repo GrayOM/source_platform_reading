@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Check, ChevronLeft, ChevronRight, Chrome, Cookie, Globe, Key, Loader2, ShieldCheck } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Chrome, Cookie, Globe, Key, Loader2, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import toast from "react-hot-toast";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -24,6 +24,7 @@ export function ScanCreate() {
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showPolicy, setShowPolicy] = useState(false);
 
   const [form, setForm] = useState({
     project_id: params.get("project") ?? "",
@@ -37,6 +38,16 @@ export function ScanCreate() {
     follow_subdomains: false,
     screenshot_pages: true,
     analyze_source_maps: true,
+    policy_intensity: "careful",
+    policy_max_pages: 15,
+    policy_max_resources: 50,
+    policy_max_depth: 1,
+    policy_request_delay_ms: 500,
+    policy_max_concurrency: 1,
+    policy_same_origin_only: true,
+    policy_allowed_hosts: "",
+    policy_excluded_hosts: "",
+    policy_authorization_confirmed: false,
   });
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({ queryKey: ["projects"], queryFn: getProjects });
@@ -59,6 +70,9 @@ export function ScanCreate() {
     if (step === 2) {
       if (form.max_depth < 1 || form.max_depth > 20) return "Max depth must be between 1 and 20.";
       if (form.max_pages < 1 || form.max_pages > 5000) return "Max pages must be between 1 and 5000.";
+      if (form.policy_max_pages < 1 || form.policy_max_pages > 500) return "Policy max pages must be between 1 and 500.";
+      if (form.policy_max_resources < 1 || form.policy_max_resources > 1000) return "Policy max resources must be between 1 and 1000.";
+      if (form.policy_max_concurrency < 1 || form.policy_max_concurrency > 6) return "Policy max concurrency must be between 1 and 6.";
     }
     return "";
   };
@@ -86,6 +100,11 @@ export function ScanCreate() {
         .split("\n")
         .map((path) => path.trim())
         .filter(Boolean);
+      const splitList = (value: string) =>
+        value
+          .split(/\n|,/)
+          .map((item) => item.trim())
+          .filter(Boolean);
 
       const payload = {
         project_id: form.project_id,
@@ -97,6 +116,22 @@ export function ScanCreate() {
           follow_subdomains: form.follow_subdomains,
           screenshot_pages: form.screenshot_pages,
           analyze_source_maps: form.analyze_source_maps,
+        },
+        scan_policy: {
+          intensity: form.policy_intensity,
+          max_pages: form.policy_max_pages,
+          max_resources: form.policy_max_resources,
+          max_depth: form.policy_max_depth,
+          request_delay_ms: form.policy_request_delay_ms,
+          max_concurrency: form.policy_max_concurrency,
+          same_origin_only: form.policy_same_origin_only,
+          allowed_hosts: splitList(form.policy_allowed_hosts),
+          excluded_hosts: splitList(form.policy_excluded_hosts),
+          excluded_paths: excluded,
+          capture_screenshots: form.screenshot_pages,
+          capture_storage: true,
+          capture_api_flows: true,
+          authorization_confirmed: form.policy_authorization_confirmed,
         },
         auth: {
           method: form.auth_method,
@@ -236,6 +271,65 @@ export function ScanCreate() {
                 </label>
               ))}
             </div>
+            <div className="rounded-lg border border-slate-800 bg-slate-950/40">
+              <button type="button" onClick={() => setShowPolicy((value) => !value)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
+                <span className="flex items-center gap-2 text-sm font-semibold text-white">
+                  <SlidersHorizontal className="h-4 w-4 text-emerald-300" />
+                  Advanced scan policy
+                </span>
+                <span className="text-xs text-slate-500">{showPolicy ? "Hide" : "Show"}</span>
+              </button>
+              {showPolicy && (
+                <div className="grid gap-4 border-t border-slate-800 p-4">
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <Field label="Intensity">
+                      <Select value={form.policy_intensity} onChange={(e) => set("policy_intensity", e.target.value)}>
+                        <option value="careful">Careful</option>
+                        <option value="low">Low</option>
+                        <option value="normal">Normal</option>
+                      </Select>
+                    </Field>
+                    <Field label="Policy max pages">
+                      <TextInput type="number" min={1} max={500} value={form.policy_max_pages} onChange={(e) => set("policy_max_pages", Number(e.target.value))} />
+                    </Field>
+                    <Field label="Max resources">
+                      <TextInput type="number" min={1} max={1000} value={form.policy_max_resources} onChange={(e) => set("policy_max_resources", Number(e.target.value))} />
+                    </Field>
+                    <Field label="Policy max depth">
+                      <TextInput type="number" min={1} max={5} value={form.policy_max_depth} onChange={(e) => set("policy_max_depth", Number(e.target.value))} />
+                    </Field>
+                    <Field label="Request delay ms">
+                      <TextInput type="number" min={100} max={5000} value={form.policy_request_delay_ms} onChange={(e) => set("policy_request_delay_ms", Number(e.target.value))} />
+                    </Field>
+                    <Field label="Max concurrency">
+                      <TextInput type="number" min={1} max={6} value={form.policy_max_concurrency} onChange={(e) => set("policy_max_concurrency", Number(e.target.value))} />
+                    </Field>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Allowed hosts" hint="Comma or newline separated. Target host is added automatically.">
+                      <TextArea rows={3} value={form.policy_allowed_hosts} onChange={(e) => set("policy_allowed_hosts", e.target.value)} placeholder="example.com" className="font-mono" />
+                    </Field>
+                    <Field label="Excluded hosts">
+                      <TextArea rows={3} value={form.policy_excluded_hosts} onChange={(e) => set("policy_excluded_hosts", e.target.value)} placeholder="cdn.example.net" className="font-mono" />
+                    </Field>
+                  </div>
+                  <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-800 bg-slate-950/60 p-4">
+                    <input type="checkbox" checked={form.policy_same_origin_only} onChange={(e) => set("policy_same_origin_only", e.target.checked)} className="mt-1 h-4 w-4 accent-emerald-500" />
+                    <span>
+                      <span className="block text-sm font-semibold text-white">Same origin only</span>
+                      <span className="text-xs leading-5 text-slate-500">Block redirects and discovered links outside the target origin unless explicitly allowed by policy.</span>
+                    </span>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+                    <input type="checkbox" checked={form.policy_authorization_confirmed} onChange={(e) => set("policy_authorization_confirmed", e.target.checked)} className="mt-1 h-4 w-4 accent-amber-400" />
+                    <span>
+                      <span className="block text-sm font-semibold text-amber-100">Authorization confirmed</span>
+                      <span className="text-xs leading-5 text-amber-200/80">Confirm that you are authorized to scan the target and selected scope.</span>
+                    </span>
+                  </label>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -251,6 +345,9 @@ export function ScanCreate() {
                 ["Authentication", authMethods.find((method) => method.value === form.auth_method)?.label ?? form.auth_method],
                 ["Max depth", form.max_depth],
                 ["Max pages", form.max_pages],
+                ["Policy intensity", form.policy_intensity],
+                ["Policy limits", `${form.policy_max_pages} pages / ${form.policy_max_resources} resources / depth ${form.policy_max_depth}`],
+                ["Authorization confirmed", form.policy_authorization_confirmed ? "Yes" : "No"],
                 ["Source maps", form.analyze_source_maps ? "Enabled" : "Disabled"],
               ].map(([label, value]) => (
                 <div key={String(label)} className="grid gap-2 rounded-lg border border-slate-800 bg-slate-950/40 p-4 sm:grid-cols-[160px_1fr]">

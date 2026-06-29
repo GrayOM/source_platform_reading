@@ -123,6 +123,28 @@
     <tr><th>Evidence Artifacts</th><td>{{ evidence_summary.total_artifacts_count }}</td></tr>
   </table>
 
+  <h2>Scan Policy Summary</h2>
+  <table>
+    <tr><th>Policy</th><td>{{ scan_policy.policy_name or 'N/A' }}</td></tr>
+    <tr><th>Intensity</th><td>{{ scan_policy.intensity or 'N/A' }}</td></tr>
+    <tr><th>Limits</th><td>pages {{ scan_policy.max_pages or 'N/A' }}, resources {{ scan_policy.max_resources or 'N/A' }}, depth {{ scan_policy.max_depth or 'N/A' }}, concurrency {{ scan_policy.max_concurrency or 'N/A' }}</td></tr>
+    <tr><th>Request Controls</th><td>delay {{ scan_policy.request_delay_ms or 'N/A' }} ms, timeout {{ scan_policy.request_timeout_ms or 'N/A' }} ms</td></tr>
+    <tr><th>Scope</th><td>same origin only: {{ scan_policy.same_origin_only }}<br>allowed hosts: {% for host in scan_policy.allowed_hosts %}{{ host }}{% if not loop.last %}, {% endif %}{% else %}N/A{% endfor %}</td></tr>
+    <tr><th>Excluded Hosts</th><td>{% for host in scan_policy.excluded_hosts %}{{ host }}{% if not loop.last %}, {% endif %}{% else %}N/A{% endfor %}</td></tr>
+    <tr><th>Excluded Paths</th><td>{% for path in scan_policy.excluded_paths %}<code>{{ path }}</code>{% if not loop.last %}<br>{% endif %}{% else %}N/A{% endfor %}</td></tr>
+    <tr><th>Authorization Confirmed</th><td>{{ scan_policy.authorization_confirmed }}</td></tr>
+    <tr><th>Policy Events</th><td>{{ policy_events|length }}</td></tr>
+  </table>
+  <p class="muted">Collection was constrained by the saved scan policy. Blocked or skipped URLs are recorded as policy events and are not treated as confirmed vulnerabilities.</p>
+  {% if policy_events %}
+  <table>
+    <tr><th>Event</th><th>URL</th><th>Reason</th><th>Severity</th></tr>
+    {% for event in policy_events[:20] %}
+    <tr><td>{{ event.event_type }}</td><td class="wrap-url"><code>{{ event.url or 'N/A' }}</code></td><td>{{ event.reason }}</td><td>{{ event.severity }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
   <h2>Triage Summary</h2>
   <table>
     <tr><th>Status</th><th>Count</th></tr>

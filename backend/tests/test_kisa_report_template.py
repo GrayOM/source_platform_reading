@@ -1,7 +1,10 @@
 import json
+import hashlib
+import sys
 import uuid
 import zipfile
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -14,6 +17,7 @@ from app.models.resource import Resource, ResourceType
 from app.models.scan import AuthMethod, Scan, ScanSession, ScanStatus
 from app.services.report.report_engine import ReportEngine
 from app.services.scan_diff import build_cross_scan_diff
+from app.services.scan_policy import ScanPolicyResolver
 
 
 def _project() -> Project:
@@ -33,6 +37,12 @@ def _scan(project: Project | None = None) -> Scan:
     )
     scan.project = project
     scan.session = ScanSession(scan_id=scan.id, auth_method=AuthMethod.BROWSER)
+    scan.config = {
+        "scan_policy": ScanPolicyResolver.resolve("https://example.com/app", {"intensity": "low", "excluded_paths": ["/logout"]}),
+        "policy_events": [
+            ScanPolicyResolver.policy_event("excluded_path_skipped", "https://example.com/logout", "URL path matches excluded path /logout.", "excluded_paths")
+        ],
+    }
     scan.resources = [
         Resource(scan_id=scan.id, url="https://example.com/app", resource_type=ResourceType.HTML),
         Resource(scan_id=scan.id, url="https://example.com/app.js", resource_type=ResourceType.JS),
@@ -115,6 +125,23 @@ def test_kisa_html_contains_required_sections_and_evidence_index(tmp_path):
     assert "민감정보 원문은 보고서에 포함하지 않습니다" in html
 
 
+def test_kisa_html_includes_print_css_and_pdf_safe_layout(tmp_path):
+    scan, findings = _report_fixture()
+    html = ReportEngine(scan, findings, tmp_path).generate(ReportFormat.HTML, ReportType.KISA).read_text(encoding="utf-8")
+
+    for css in (
+        "@page { size: A4;",
+        "print-color-adjust: exact",
+        "overflow-wrap: anywhere",
+        "break-inside: avoid",
+        "section-break",
+        "artifact-index",
+        "민감정보 원문은 보고서에 포함하지 않습니다",
+        "border: 2px dashed #94a3b8",
+    ):
+        assert css in html
+
+
 def test_kisa_html_uses_state_specific_wording_and_false_positive_separation(tmp_path):
     scan, findings = _report_fixture()
     html = ReportEngine(scan, findings, tmp_path).generate(ReportFormat.HTML, ReportType.KISA).read_text(encoding="utf-8")
@@ -186,6 +213,79 @@ def test_kisa_markdown_and_existing_full_outputs_still_generate(tmp_path):
     assert "Security Assessment Report" in full_html
 
 
+def test_pdf_success_path_writes_pdf_with_filename_convention(monkeypatch, tmp_path):
+    scan, findings = _report_fixture()
+
+    class FakeHTML:
+        def __init__(self, filename: str):
+            self.filename = filename
+
+        def write_pdf(self, output_path: str):
+            assert self.filename.endswith(".html")
+            with open(output_path, "wb") as fh:
+                fh.write(b"%PDF-1.4\n")
+
+    monkeypatch.setitem(sys.modules, "weasyprint", SimpleNamespace(HTML=FakeHTML))
+    path = ReportEngine(scan, findings, tmp_path).generate(ReportFormat.PDF, ReportType.KISA)
+
+    assert path.name == f"sss_report_{str(scan.id)[:8]}_kisa.pdf"
+    assert path.read_bytes().startswith(b"%PDF")
+
+
+def test_pdf_failure_falls_back_to_html_with_error(monkeypatch, tmp_path):
+    scan, findings = _report_fixture()
+
+    class FakeHTML:
+        def __init__(self, filename: str):
+            self.filename = filename
+
+        def write_pdf(self, output_path: str):
+            raise RuntimeError("renderer unavailable")
+
+    monkeypatch.setitem(sys.modules, "weasyprint", SimpleNamespace(HTML=FakeHTML))
+    engine = ReportEngine(scan, findings, tmp_path)
+    path = engine.generate(ReportFormat.PDF, ReportType.FULL)
+
+    assert path.name == f"sss_report_{str(scan.id)[:8]}_full.html"
+    assert "Security Assessment Report" in path.read_text(encoding="utf-8")
+    assert engine.last_pdf_error == "renderer unavailable"
+
+
+def test_pdf_renderer_diagnostic_reports_smoke_success(monkeypatch):
+    class FakeHTML:
+        def __init__(self, string: str):
+            self.string = string
+
+        def write_pdf(self, output_path: str):
+            assert "한글 테스트" in self.string
+            with open(output_path, "wb") as fh:
+                fh.write(b"%PDF-1.4\n")
+
+    monkeypatch.setitem(sys.modules, "weasyprint", SimpleNamespace(HTML=FakeHTML, __version__="test"))
+    diagnostic = ReportEngine.pdf_renderer_diagnostic()
+
+    assert diagnostic["available"] is True
+    assert diagnostic["version"] == "test"
+    assert diagnostic["smoke_bytes"] > 0
+    assert diagnostic["error"] is None
+
+
+def test_pdf_renderer_diagnostic_reports_import_or_runtime_failure(monkeypatch):
+    class FakeHTML:
+        def __init__(self, string: str):
+            self.string = string
+
+        def write_pdf(self, output_path: str):
+            raise RuntimeError("missing native library")
+
+    monkeypatch.setitem(sys.modules, "weasyprint", SimpleNamespace(HTML=FakeHTML, __version__="test"))
+    diagnostic = ReportEngine.pdf_renderer_diagnostic()
+
+    assert diagnostic["available"] is False
+    assert diagnostic["smoke_bytes"] == 0
+    assert "missing native library" in diagnostic["error"]
+
+
 @pytest.mark.asyncio
 async def test_evidence_bundle_contains_kisa_report_and_artifact_index(monkeypatch, tmp_path):
     from app.api.v1 import reports as reports_api
@@ -207,7 +307,19 @@ async def test_evidence_bundle_contains_kisa_report_and_artifact_index(monkeypat
 
         user = (await db.execute(select(User).where(User.email == "kisa-bundle@example.com"))).scalar_one()
         project = Project(owner=user, name="Bundle Project")
-        scan = Scan(id=uuid.uuid4(), project=project, target_url="https://example.com", status=ScanStatus.COMPLETED, progress=100)
+        scan = Scan(
+            id=uuid.uuid4(),
+            project=project,
+            target_url="https://example.com",
+            status=ScanStatus.COMPLETED,
+            progress=100,
+            config={
+                "scan_policy": ScanPolicyResolver.resolve("https://example.com", {"intensity": "low", "excluded_paths": ["/logout"]}),
+                "policy_events": [
+                    ScanPolicyResolver.policy_event("excluded_path_skipped", "https://example.com/logout", "URL path matches excluded path /logout.", "excluded_paths")
+                ],
+            },
+        )
         finding = _finding(scan, "Bundle verified finding", TriageStatus.VERIFIED)
         report = Report(
             scan=scan,
@@ -235,17 +347,47 @@ async def test_evidence_bundle_contains_kisa_report_and_artifact_index(monkeypat
         )
 
     assert response.status_code == 200
-    bundle_path = tmp_path / str(scan_id) / "reports" / f"evidence_bundle_{str(scan_id)[:8]}.zip"
+    bundle_path = tmp_path / str(scan_id) / "reports" / f"sss_evidence_bundle_{str(scan_id)[:8]}.zip"
     with zipfile.ZipFile(bundle_path) as zf:
         names = set(zf.namelist())
+    assert {"manifest.json", "README.txt"}.issubset(names)
+    assert "reports/full_report.html" in names
+    assert "reports/kisa_report.html" in names
+    assert "reports/summary.md" in names
+    assert "reports/report.json" in names
+    assert "reports/report_metadata.json" in names
+    assert "reports/scan_policy.json" in names
+    assert "reports/policy_events.json" in names
+    assert "evidence/artifact_index.json" in names
+    assert "evidence/screenshots/shot.png" in names
     assert "kisa_report.html" in names
     assert "kisa_summary.md" in names
     assert "artifact_index.json" in names
     assert "report_metadata.json" in names
+    assert "scan_policy.json" in names
+    assert "policy_events.json" in names
     assert "screenshots/shot.png" in names
     with zipfile.ZipFile(bundle_path) as zf:
-        metadata = json.loads(zf.read("report_metadata.json").decode("utf-8"))
+        metadata = json.loads(zf.read("reports/report_metadata.json").decode("utf-8"))
+        scan_policy = json.loads(zf.read("reports/scan_policy.json").decode("utf-8"))
+        policy_events = json.loads(zf.read("reports/policy_events.json").decode("utf-8"))
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        readme = zf.read("README.txt").decode("utf-8")
     assert metadata["client_name"] == "Bundle Client"
+    assert scan_policy["intensity"] == "low"
+    assert policy_events[0]["event_type"] == "excluded_path_skipped"
+    assert manifest["redaction_applied"] is True
+    assert manifest["policy_event_count"] == 1
+    assert manifest["formats_included"] == ["html", "markdown", "json"]
+    assert manifest["artifact_count"] >= 1
+    with zipfile.ZipFile(bundle_path) as zf:
+        metadata_bytes = zf.read("reports/report_metadata.json")
+        policy_bytes = zf.read("reports/scan_policy.json")
+    assert manifest["checksums"]["reports/report_metadata.json"] == hashlib.sha256(metadata_bytes).hexdigest()
+    assert manifest["checksums"]["reports/scan_policy.json"] == hashlib.sha256(policy_bytes).hexdigest()
+    assert "Redaction notice" in readme
+    assert "Scan policy:" in readme
+    assert "evidence/artifact_index.json" in readme
 
 
 @pytest.mark.asyncio
@@ -333,3 +475,86 @@ def test_report_metadata_renders_in_kisa_html_and_escapes_payload(tmp_path):
     assert "2.0" in html
     assert "Submitted browser scope" in html
     assert "&lt;b&gt;note&lt;/b&gt;" in html
+
+
+@pytest.mark.asyncio
+async def test_report_download_uses_actual_media_type_and_filename(monkeypatch, tmp_path):
+    from app.api.v1 import reports as reports_api
+    from app.core.database import AsyncSessionLocal
+    from app.models.user import User
+    from sqlalchemy import select
+
+    monkeypatch.setattr(reports_api.settings, "scan_data_path", tmp_path)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/api/v1/auth/register",
+            json={"email": "pdf-download@example.com", "password": "strongpassword123", "full_name": "PDF Download"},
+        )
+        login = await client.post("/api/v1/auth/login", json={"email": "pdf-download@example.com", "password": "strongpassword123"})
+        token = login.json()["access_token"]
+
+    async with AsyncSessionLocal() as db:
+        user = (await db.execute(select(User).where(User.email == "pdf-download@example.com"))).scalar_one()
+        project = Project(owner=user, name="PDF Project")
+        scan = Scan(project=project, target_url="https://example.com", status=ScanStatus.COMPLETED, progress=100)
+        html_path = tmp_path / "fallback.html"
+        html_path.write_text("<html>fallback</html>", encoding="utf-8")
+        pdf_fallback = Report(
+            scan=scan,
+            format=ReportFormat.PDF,
+            report_type=ReportType.FULL,
+            file_path=str(html_path),
+            file_size=html_path.stat().st_size,
+            report_status="fallback",
+            error_message="PDF generation failed; HTML fallback generated.",
+        )
+        pdf_path = tmp_path / "real.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4\n")
+        pdf_success = Report(
+            scan=scan,
+            format=ReportFormat.PDF,
+            report_type=ReportType.KISA,
+            file_path=str(pdf_path),
+            file_size=pdf_path.stat().st_size,
+            report_status="generated",
+        )
+        db.add_all([project, scan, pdf_fallback, pdf_success])
+        await db.commit()
+        fallback_id = pdf_fallback.id
+        success_id = pdf_success.id
+        scan_short = str(scan.id)[:8]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        fallback_response = await client.get(f"/api/v1/reports/{fallback_id}/download", headers={"Authorization": f"Bearer {token}"})
+        success_response = await client.get(f"/api/v1/reports/{success_id}/download", headers={"Authorization": f"Bearer {token}"})
+
+    assert fallback_response.status_code == 200
+    assert fallback_response.headers["content-type"].startswith("text/html")
+    assert f"sss_report_{scan_short}_full.html" in fallback_response.headers["content-disposition"]
+    assert success_response.status_code == 200
+    assert success_response.headers["content-type"].startswith("application/pdf")
+    assert f"sss_report_{scan_short}_kisa.pdf" in success_response.headers["content-disposition"]
+
+
+def test_report_outputs_share_summary_values_and_metadata(tmp_path):
+    scan, findings = _report_fixture()
+    metadata = {"client_name": "Consistency Client", "document_version": "3.0"}
+    engine = ReportEngine(scan, findings, tmp_path, report_metadata=metadata)
+    json_payload = json.loads(engine.generate(ReportFormat.JSON, ReportType.FULL).read_text(encoding="utf-8"))
+    markdown = engine.generate(ReportFormat.MARKDOWN, ReportType.FULL).read_text(encoding="utf-8")
+    full_html = engine.generate(ReportFormat.HTML, ReportType.FULL).read_text(encoding="utf-8")
+    kisa_html = engine.generate(ReportFormat.HTML, ReportType.KISA).read_text(encoding="utf-8")
+
+    assert json_payload["report_metadata"]["client_name"] == "Consistency Client"
+    assert json_payload["kisa_report_metadata"]["redaction_applied"] is True
+    assert json_payload["triage_summary"]["verified_findings_count"] == 1
+    assert json_payload["triage_summary"]["candidate_findings_count"] == 1
+    assert json_payload["triage_summary"]["false_positive_count"] == 1
+    assert json_payload["severity_counts"]["high"] == 1
+    assert json_payload["evidence_summary"]["total_artifacts_count"] == 3
+    for text in (markdown, full_html, kisa_html):
+        assert "Consistency Client" in text
+        assert "Verified" in text or "Verified:" in text
+        assert "Candidate" in text or "Candidate:" in text
+        assert "False Positive" in text
+        assert "Evidence Artifact" in text or "Evidence Artifacts" in text

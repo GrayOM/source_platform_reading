@@ -5,8 +5,10 @@ downloads all unique resources while respecting scope and limits.
 """
 import asyncio
 import hashlib
+import ipaddress
 import json
 import re
+import socket
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +25,7 @@ from app.services.auth.session_manager import apply_session_to_context
 from app.services.crawler.sitemap_builder import SitemapBuilder
 from app.services.collector.resource_classifier import classify_url, classify_mime
 from app.services.evidence.redaction import redact_value, redacted_preview
+from app.services.scan_policy import ScanPolicyResolver
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -36,6 +39,7 @@ class CrawlResult:
     endpoint_candidates: list[str] = field(default_factory=list)
     websocket_urls: list[str] = field(default_factory=list)
     failed_urls: list[dict] = field(default_factory=list)
+    policy_events: list[dict] = field(default_factory=list)
     artifact_candidates: list[dict] = field(default_factory=list)
 
 
@@ -75,13 +79,24 @@ class PlaywrightCrawler:
         self.base_domain = parsed.netloc
         self.base_scheme = parsed.scheme
 
-        self.max_depth = config.get("max_depth", settings.max_crawl_depth)
-        self.max_pages = config.get("max_pages", settings.max_crawl_pages)
-        self.concurrency = config.get("concurrency", settings.crawl_concurrency)
+        self.policy = config.get("scan_policy") or ScanPolicyResolver.resolve(target_url, None, config)
+        self.max_depth = self.policy.get("max_depth", config.get("max_depth", settings.max_crawl_depth))
+        self.max_pages = self.policy.get("max_pages", config.get("max_pages", settings.max_crawl_pages))
+        self.max_resources = self.policy.get("max_resources", settings.max_crawl_pages * 3)
+        self.concurrency = self.policy.get("max_concurrency", config.get("concurrency", settings.crawl_concurrency))
+        self.request_delay_ms = self.policy.get("request_delay_ms", 0)
+        self.request_timeout_ms = self.policy.get("request_timeout_ms", settings.crawl_timeout_seconds * 1000)
+        self.same_origin_only = self.policy.get("same_origin_only", True)
+        self.allowed_hosts = set(self.policy.get("allowed_hosts") or [])
+        self.excluded_hosts = set(self.policy.get("excluded_hosts") or [])
+        self.allow_private_targets = bool(self.policy.get("allow_private_targets"))
+        self.allow_redirect_outside_scope = bool(self.policy.get("allow_redirect_outside_scope"))
         self.follow_subdomains = config.get("follow_subdomains", False)
         self.allow_external_resources = config.get("allow_external_resources", settings.allow_external_resources)
-        self.excluded_paths: list[str] = config.get("excluded_paths", [])
-        self.screenshot = config.get("screenshot_pages", True)
+        self.excluded_paths: list[str] = self.policy.get("excluded_paths") or config.get("excluded_paths", [])
+        self.screenshot = bool(self.policy.get("capture_screenshots", config.get("screenshot_pages", True)))
+        self.capture_storage = bool(self.policy.get("capture_storage", True))
+        self.capture_api_flows = bool(self.policy.get("capture_api_flows", True))
 
         self.visited_pages: set[str] = set()
         self.queued_pages: set[str] = set()
@@ -89,6 +104,7 @@ class PlaywrightCrawler:
         self.endpoint_candidates: set[str] = set()
         self.ws_urls: set[str] = set()
         self.failed_urls: list[dict] = []
+        self.policy_events: list[dict] = []
         self.artifact_candidates: list[dict] = []
         self.sitemap_builder = SitemapBuilder()
         self.semaphore: asyncio.Semaphore | None = None
@@ -100,23 +116,38 @@ class PlaywrightCrawler:
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme not in ("http", "https"):
             return False
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if not host or host in self.excluded_hosts:
+            return False
+        if self.allowed_hosts and host not in self.allowed_hosts:
+            return False
+        if self.same_origin_only and parsed.netloc != self.base_domain:
+            return False
         if self.follow_subdomains:
             base = ".".join(self.base_domain.split(".")[-2:])
             return parsed.netloc.endswith(base)
         return parsed.netloc == self.base_domain
 
     def _can_download_resource(self, url: str) -> bool:
-        if not self.allow_external_resources and not self._is_in_scope(url):
+        if len(self.discovered_resources) >= self.max_resources:
+            self._record_policy_event("max_resources_reached", url, "Resource collection limit reached.", "max_resources", "warning")
             return False
-        try:
-            validate_public_http_url(url)
-        except ValueError:
+        if not self.allow_external_resources and not self._is_in_scope(url):
+            self._record_policy_event("outside_scope_blocked", url, "Resource host is outside scan policy scope.", "allowed_hosts", "warning")
+            return False
+        if self._is_excluded(url):
+            return False
+        if not self._is_url_allowed_by_private_policy(url):
             return False
         return True
 
     def _is_excluded(self, url: str) -> bool:
         path = urllib.parse.urlparse(url).path
-        return any(path.startswith(ex) for ex in self.excluded_paths)
+        matched = next((ex for ex in self.excluded_paths if path.startswith(ex)), None)
+        if matched:
+            self._record_policy_event("excluded_path_skipped", url, f"URL path matches excluded path {matched}.", "excluded_paths")
+            return True
+        return False
 
     def _normalize_url(self, url: str, base: str) -> str | None:
         try:
@@ -161,17 +192,25 @@ class PlaywrightCrawler:
             endpoint_candidates=list(self.endpoint_candidates),
             websocket_urls=list(self.ws_urls),
             failed_urls=self.failed_urls,
+            policy_events=self.policy_events,
             artifact_candidates=self.artifact_candidates,
         )
 
     async def _crawl_page(self, context: BrowserContext, url: str, depth: int, parent: str | None) -> None:
         if depth > self.max_depth:
+            self._record_policy_event("max_depth_reached", url, "Crawl depth limit reached.", "max_depth")
             return
         if len(self.visited_pages) >= self.max_pages:
+            self._record_policy_event("max_pages_reached", url, "Page crawl limit reached.", "max_pages", "warning")
             return
         if url in self.visited_pages:
             return
-        if not self._is_in_scope(url) or self._is_excluded(url):
+        if self._is_excluded(url):
+            return
+        if not self._is_in_scope(url):
+            self._record_policy_event("outside_scope_blocked", url, "Page URL is outside scan policy scope.", "allowed_hosts", "warning")
+            return
+        if not self._is_url_allowed_by_private_policy(url):
             return
 
         self.visited_pages.add(url)
@@ -189,6 +228,18 @@ class PlaywrightCrawler:
                     req_url = req.url
                     resource_type = req.resource_type
 
+                    if req_url.startswith(("http://", "https://")):
+                        if self._is_excluded(req_url):
+                            await route.abort()
+                            return
+                        if not self._is_in_scope(req_url):
+                            self._record_policy_event("outside_scope_blocked", req_url, "Browser request is outside scan policy scope.", "allowed_hosts", "warning")
+                            await route.abort()
+                            return
+                        if not self._is_url_allowed_by_private_policy(req_url):
+                            await route.abort()
+                            return
+
                     if resource_type in ("xhr", "fetch"):
                         self.endpoint_candidates.add(req_url)
                         self._record_api_request(req)
@@ -197,6 +248,10 @@ class PlaywrightCrawler:
                     elif resource_type in ("script", "stylesheet", "image", "font", "document"):
                         rtype = classify_url(req_url)
                         if rtype and self._can_download_resource(req_url) and req_url not in self.discovered_resources:
+                            if len(self.discovered_resources) >= self.max_resources:
+                                self._record_policy_event("max_resources_reached", req_url, "Resource collection limit reached.", "max_resources", "warning")
+                                await route.abort()
+                                return
                             discovered_on_this_page.append(req_url)
                             self.discovered_resources[req_url] = DiscoveredResource(
                                 url=req_url,
@@ -209,13 +264,26 @@ class PlaywrightCrawler:
 
                 await page.route("**/*", handle_request)
 
-                validate_public_http_url(url)
-                response = await page.goto(url, wait_until="networkidle", timeout=settings.crawl_timeout_seconds * 1000)
+                if self.request_delay_ms:
+                    await asyncio.sleep(self.request_delay_ms / 1000)
+                if not self._is_url_allowed_by_private_policy(url):
+                    await page.close()
+                    return
+                response = await page.goto(url, wait_until="networkidle", timeout=self.request_timeout_ms)
                 if response:
                     status = response.status
                     final_url = response.url
-                    validate_public_http_url(final_url)
-                    if not self._is_in_scope(final_url):
+                    if not self._is_url_allowed_by_private_policy(final_url):
+                        await page.close()
+                        return
+                    if not self._is_in_scope(final_url) and not self.allow_redirect_outside_scope:
+                        self._record_policy_event(
+                            "redirect_outside_scope_blocked",
+                            final_url,
+                            f"Navigation from {url} redirected outside scan policy scope.",
+                            "allow_redirect_outside_scope",
+                            "warning",
+                        )
                         await page.close()
                         return
                     content_type = response.headers.get("content-type", "").split(";")[0].lower()
@@ -255,7 +323,8 @@ class PlaywrightCrawler:
                         "metadata": {"requested_url": url, "parent": parent},
                     }
                 )
-                await self._record_storage_snapshot(page, url)
+                if self.capture_storage:
+                    await self._record_storage_snapshot(page, url)
 
                 # Extract navigable page links only. Scripts/styles are captured
                 # by the request route and must not be re-queued as pages.
@@ -296,6 +365,8 @@ class PlaywrightCrawler:
                     if norm and self._is_in_scope(norm) and norm not in self.visited_pages:
                         child_pages.append(norm)
                         self.sitemap_builder.add_link(url, norm)
+                    elif norm and norm not in self.visited_pages:
+                        self._record_policy_event("outside_scope_blocked", norm, "Discovered link is outside scan policy scope.", "allowed_hosts")
 
                 if self.progress_callback:
                     await asyncio.to_thread(
@@ -324,9 +395,19 @@ class PlaywrightCrawler:
             return
 
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=30) as client:
+            if self.request_delay_ms:
+                await asyncio.sleep(self.request_delay_ms / 1000)
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=self.request_timeout_ms / 1000) as client:
                 resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
                 if not self._can_download_resource(str(resp.url)):
+                    if str(resp.url) != url:
+                        self._record_policy_event(
+                            "redirect_outside_scope_blocked",
+                            str(resp.url),
+                            f"Resource request from {url} redirected outside scan policy scope.",
+                            "allow_redirect_outside_scope",
+                            "warning",
+                        )
                     return
                 if resp.status_code >= 400:
                     return
@@ -379,6 +460,8 @@ class PlaywrightCrawler:
 
         except Exception as exc:
             log.warning("crawl.download_failed", url=url, error=str(exc))
+            if "timeout" in str(exc).lower():
+                self._record_policy_event("request_timeout", url, str(exc), "request_timeout_ms", "warning")
 
     def _resource_metadata(self, **extra) -> dict:
         metadata = dict(extra)
@@ -391,6 +474,8 @@ class PlaywrightCrawler:
         return "authenticated" if self.authenticated_context else "anonymous"
 
     def _record_api_request(self, request) -> None:
+        if not self.capture_api_flows:
+            return
         try:
             preview = None
             post_data = request.post_data
@@ -413,6 +498,8 @@ class PlaywrightCrawler:
             log.warning("crawl.api_request_artifact_failed", error=str(exc))
 
     def _record_api_response(self, response) -> None:
+        if not self.capture_api_flows:
+            return
         try:
             request = response.request
             if request.resource_type not in ("xhr", "fetch"):
@@ -432,6 +519,40 @@ class PlaywrightCrawler:
             )
         except Exception as exc:
             log.warning("crawl.api_response_artifact_failed", error=str(exc))
+
+    def _is_url_allowed_by_private_policy(self, url: str) -> bool:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            self._record_policy_event("outside_scope_blocked", url, "Only http and https URLs with hostnames are allowed.", "allowed_hosts", "warning")
+            return False
+        if self.allow_private_targets:
+            return True
+        try:
+            validate_public_http_url(url)
+            return True
+        except ValueError as exc:
+            event_type = "private_target_blocked" if self._looks_private_host(parsed.hostname) else "outside_scope_blocked"
+            self._record_policy_event(event_type, url, str(exc), "allow_private_targets", "error" if event_type == "private_target_blocked" else "warning")
+            return False
+
+    def _looks_private_host(self, hostname: str) -> bool:
+        host = hostname.lower().rstrip(".")
+        if host in ("localhost", "localhost."):
+            return True
+        try:
+            ip = ipaddress.ip_address(socket.gethostbyname(hostname))
+            return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+        except Exception:
+            return False
+
+    def _record_policy_event(self, event_type: str, url: str | None, reason: str, policy_field: str | None = None, severity: str = "info") -> None:
+        event = ScanPolicyResolver.policy_event(event_type, url, reason, policy_field, severity)
+        dedupe_key = (event_type, url, policy_field)
+        existing = {(item.get("event_type"), item.get("url"), item.get("policy_field")) for item in self.policy_events}
+        if dedupe_key not in existing:
+            self.policy_events.append(event)
+            if url:
+                self.failed_urls.append({"url": url, "error": reason, "policy_event": event_type})
 
     async def _record_storage_snapshot(self, page: Page, url: str) -> None:
         try:

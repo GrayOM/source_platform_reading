@@ -100,6 +100,9 @@ export function ScanDetail() {
 
   const status = STATUS_CONFIG[scan.status] ?? STATUS_CONFIG.pending;
   const progress = Math.max(0, Math.min(100, scan.progress ?? 0));
+  const scanPolicy = scan.config?.scan_policy ?? {};
+  const policyEvents = scan.config?.policy_events ?? [];
+  const blockedEvents = policyEvents.filter((event: any) => String(event.event_type ?? "").includes("blocked") || String(event.event_type ?? "").includes("skipped"));
 
   return (
     <PageShell className="max-w-5xl">
@@ -202,6 +205,47 @@ export function ScanDetail() {
           </div>
         </Card>
       )}
+
+      <Card className="mt-6 p-5">
+        <div className="mb-4 flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 text-emerald-300" />
+          <h2 className="font-semibold text-white">Scan Policy Summary</h2>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-4">
+          {[
+            ["Intensity", scanPolicy.intensity ?? "N/A"],
+            ["Pages", `${scan.pages_discovered ?? 0} / ${scanPolicy.max_pages ?? "N/A"}`],
+            ["Resources", `${scan.resources_collected ?? 0} / ${scanPolicy.max_resources ?? "N/A"}`],
+            ["Policy events", policyEvents.length],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+              <div className="text-lg font-semibold text-white">{String(value)}</div>
+              <div className="text-xs text-slate-500">{label}</div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+            <div className="mb-1 text-xs font-semibold uppercase text-slate-500">Scope</div>
+            <div className="break-words text-sm text-slate-300">Allowed: {(scanPolicy.allowed_hosts ?? []).join(", ") || "N/A"}</div>
+            <div className="mt-1 break-words text-sm text-slate-400">Excluded paths: {(scanPolicy.excluded_paths ?? []).join(", ") || "N/A"}</div>
+          </div>
+          <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+            <div className="mb-1 text-xs font-semibold uppercase text-slate-500">Limits</div>
+            <div className="text-sm text-slate-300">Depth {scanPolicy.max_depth ?? "N/A"} · Concurrency {scanPolicy.max_concurrency ?? "N/A"} · Delay {scanPolicy.request_delay_ms ?? "N/A"} ms</div>
+            <div className="mt-1 text-sm text-slate-400">Blocked/skipped URLs: {blockedEvents.length}</div>
+          </div>
+        </div>
+        {blockedEvents.length > 0 && (
+          <div className="mt-4 space-y-2">
+            {blockedEvents.slice(0, 5).map((event: any, index: number) => (
+              <div key={`${event.event_type}-${index}`} className="break-all rounded-lg border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-400">
+                <span className="font-semibold text-slate-200">{event.event_type}</span> · {event.url ?? "N/A"} · {event.reason}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
 
       {scan.status === "completed" && diffCandidates.length > 0 && (
         <Card className="mt-6 p-5">

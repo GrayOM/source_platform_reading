@@ -13,6 +13,7 @@ from app.models.project import Project
 from app.models.scan import AuthMethod, Scan, ScanSession, ScanStatus
 from app.schemas.evidence import EvidenceArtifactOut
 from app.schemas.scan import AuthConfig, ScanCreate, ScanOut
+from app.services.scan_policy import ScanPolicyResolver
 from app.services.scan_diff import build_cross_scan_diff, normalized_origin, scan_auth_method
 from app.workers.scan_worker import orchestrate_scan
 
@@ -45,11 +46,40 @@ async def create_scan(payload: ScanCreate, current_user: CurrentUser, db: DB) ->
     if not proj_result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
+    scan_config = payload.config.model_dump()
+    resolved_policy = ScanPolicyResolver.resolve(
+        payload.target_url,
+        payload.scan_policy.model_dump(mode="json", exclude_none=True) if payload.scan_policy else None,
+        scan_config,
+    )
+    policy_events = []
+    if not resolved_policy.get("authorization_confirmed"):
+        policy_events.append(
+            ScanPolicyResolver.policy_event(
+                "authorization_not_confirmed",
+                payload.target_url,
+                "User did not mark explicit authorization confirmation for this scan.",
+                "authorization_confirmed",
+                "warning",
+            )
+        )
+    scan_config.update(
+        {
+            "scan_policy": resolved_policy,
+            "policy_events": policy_events,
+            "max_pages": resolved_policy["max_pages"],
+            "max_depth": resolved_policy["max_depth"],
+            "concurrency": resolved_policy["max_concurrency"],
+            "screenshot_pages": resolved_policy["capture_screenshots"],
+            "excluded_paths": resolved_policy["excluded_paths"],
+        }
+    )
+
     scan = Scan(
         project_id=payload.project_id,
         target_url=payload.target_url,
         status=ScanStatus.PENDING,
-        config=payload.config.model_dump(),
+        config=scan_config,
         started_at=datetime.now(timezone.utc),
     )
     db.add(scan)

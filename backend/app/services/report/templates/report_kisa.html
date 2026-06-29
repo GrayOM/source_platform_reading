@@ -4,39 +4,48 @@
 <meta charset="UTF-8">
 <title>웹 취약점 점검 결과 보고서 - {{ target_url }}</title>
 <style>
-  @page { margin: 18mm 14mm; }
+  @page { size: A4; margin: 16mm 12mm; }
   * { box-sizing: border-box; }
-  body { font-family: "Malgun Gothic", "맑은 고딕", Arial, sans-serif; margin: 36px; color: #1f2933; font-size: 10pt; line-height: 1.65; }
-  h1, h2, h3 { color: #123b7a; page-break-after: avoid; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-family: "Malgun Gothic", "맑은 고딕", Arial, sans-serif; margin: 32px; color: #1f2933; font-size: 9.5pt; line-height: 1.6; }
+  h1, h2, h3 { color: #123b7a; page-break-after: avoid; break-after: avoid; }
   h1 { font-size: 24pt; margin: 0 0 10px; }
-  h2 { font-size: 14pt; border-bottom: 2px solid #123b7a; padding-bottom: 5px; margin: 34px 0 12px; }
+  h2 { font-size: 14pt; border-bottom: 2px solid #123b7a; padding-bottom: 5px; margin: 34px 0 12px; page-break-before: auto; }
   h3 { font-size: 11pt; margin: 18px 0 8px; }
-  table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; table-layout: fixed; page-break-inside: avoid; }
+  table { width: 100%; max-width: 100%; border-collapse: collapse; margin: 12px 0 18px; table-layout: fixed; page-break-inside: auto; break-inside: auto; }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; break-inside: avoid; }
   th { background: #123b7a; color: #fff; font-weight: 700; text-align: left; }
-  th, td { border: 1px solid #c9d2df; padding: 7px 9px; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }
+  th, td { border: 1px solid #c9d2df; padding: 6px 8px; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; hyphens: auto; }
   code, pre { font-family: Consolas, "Courier New", monospace; overflow-wrap: anywhere; white-space: pre-wrap; word-break: break-word; }
-  pre { background: #f6f8fb; border: 1px solid #d9e2ec; padding: 10px; max-height: 320px; overflow: auto; }
-  .cover { min-height: 480px; border-bottom: 4px solid #123b7a; padding-top: 110px; margin-bottom: 34px; }
+  pre { background: #f6f8fb; border: 1px solid #d9e2ec; padding: 10px; max-height: none; overflow: visible; }
+  .cover { min-height: 420px; border-bottom: 4px solid #123b7a; padding-top: 100px; margin-bottom: 34px; page-break-after: always; }
   .subtitle { color: #52606d; font-size: 12pt; margin-top: 8px; }
   .muted { color: #66788a; }
-  .notice { border-left: 4px solid #d97706; background: #fff7ed; padding: 10px 12px; margin: 12px 0; }
+  .notice { border-left: 4px solid #d97706; background: #fff7ed; padding: 10px 12px; margin: 12px 0; page-break-inside: avoid; break-inside: avoid; }
   .redaction { border-left-color: #0f766e; background: #ecfdf5; }
-  .badge { display: inline-block; border-radius: 3px; padding: 2px 7px; font-size: 8.5pt; font-weight: 700; color: #fff; }
+  .badge { display: inline-block; border-radius: 3px; padding: 2px 7px; font-size: 8.5pt; font-weight: 700; color: #fff; border: 1px solid rgba(0,0,0,.2); }
   .sev-critical { background: #b91c1c; } .sev-high { background: #ea580c; } .sev-medium { background: #ca8a04; }
   .sev-low { background: #15803d; } .sev-info { background: #2563eb; }
   .triage-verified { background: #15803d; } .triage-false_positive { background: #64748b; }
   .triage-candidate, .triage-needs_review { background: #2563eb; } .triage-accepted_risk, .triage-fixed { background: #7c3aed; }
-  .finding { border: 1px solid #c9d2df; margin: 18px 0; page-break-inside: avoid; }
+  .finding { border: 1px solid #c9d2df; margin: 18px 0; page-break-inside: avoid; break-inside: avoid; }
   .finding-header { background: #f0f5ff; border-bottom: 1px solid #c9d2df; padding: 10px 12px; font-weight: 700; }
   .finding-body { padding: 12px; }
-  .false-positive { border-color: #94a3b8; background: #f8fafc; }
+  .false-positive { border: 2px dashed #94a3b8; background: #f8fafc; color: #475569; }
+  .false-positive .finding-header { background: #e2e8f0; color: #334155; }
   .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0 18px; }
-  .summary-card { border: 1px solid #c9d2df; padding: 10px; background: #f8fbff; page-break-inside: avoid; }
+  .summary-card { border: 1px solid #c9d2df; padding: 10px; background: #f8fbff; page-break-inside: avoid; break-inside: avoid; }
   .summary-card strong { display: block; font-size: 16pt; color: #123b7a; }
+  .artifact-index { font-size: 8.5pt; }
+  .artifact-index th, .artifact-index td { padding: 5px 6px; }
+  .section-break { page-break-before: always; break-before: page; }
   .footer { border-top: 1px solid #c9d2df; color: #66788a; font-size: 8pt; margin-top: 40px; padding-top: 12px; text-align: center; }
   @media print {
     body { margin: 0; }
-    .finding, table, pre { page-break-inside: avoid; }
+    .finding, pre, .notice, .summary-card { page-break-inside: avoid; break-inside: avoid; }
+    table { page-break-inside: auto; break-inside: auto; }
+    a, code { overflow-wrap: anywhere; word-break: break-word; }
   }
 </style>
 </head>
@@ -74,6 +83,26 @@
   <tr><th>인증 전/후 진단</th><td>인증 방식은 {{ auth_method }}입니다. Cross-scan Auth Delta가 포함된 경우 인증 전/후 공격 표면 차이를 별도 후보로 표시합니다.</td></tr>
 </table>
 <div class="notice">자동 탐지 결과는 검증 필요 후보입니다. Candidate 항목은 취약 가능성이 확인된 상태이며, 실제 취약점 확정 여부는 수동 검증 및 업무 맥락 확인이 필요합니다.</div>
+
+<h2>2-1. Scan Policy 및 안전 제한</h2>
+<table>
+  <tr><th style="width:24%">Policy</th><td>{{ scan_policy.policy_name or 'N/A' }}</td><th style="width:24%">Intensity</th><td>{{ scan_policy.intensity or 'N/A' }}</td></tr>
+  <tr><th>수집 한도</th><td>pages {{ scan_policy.max_pages or 'N/A' }}, resources {{ scan_policy.max_resources or 'N/A' }}, depth {{ scan_policy.max_depth or 'N/A' }}</td><th>동시성/지연</th><td>concurrency {{ scan_policy.max_concurrency or 'N/A' }}, delay {{ scan_policy.request_delay_ms or 'N/A' }} ms</td></tr>
+  <tr><th>허용 Host</th><td colspan="3">{% for host in scan_policy.allowed_hosts %}{{ host }}{% if not loop.last %}, {% endif %}{% else %}N/A{% endfor %}</td></tr>
+  <tr><th>제외 Host</th><td colspan="3">{% for host in scan_policy.excluded_hosts %}{{ host }}{% if not loop.last %}, {% endif %}{% else %}N/A{% endfor %}</td></tr>
+  <tr><th>제외 Path</th><td colspan="3">{% for path in scan_policy.excluded_paths %}<code>{{ path }}</code>{% if not loop.last %}<br>{% endif %}{% else %}N/A{% endfor %}</td></tr>
+  <tr><th>Scope 제한</th><td>same origin only: {{ scan_policy.same_origin_only }}</td><th>인증 승인 확인</th><td>{{ scan_policy.authorization_confirmed }}</td></tr>
+  <tr><th>Policy Event</th><td colspan="3">{{ policy_events|length }}개</td></tr>
+</table>
+<div class="notice">본 진단은 저장된 Scan Policy 범위와 요청 제한 내에서 수행되었습니다. 정책에 따라 차단 또는 제외된 URL은 취약점이 아니라 감사 이벤트로 기록됩니다.</div>
+{% if policy_events %}
+<table>
+  <tr><th>Event</th><th>URL</th><th>Reason</th><th>Severity</th></tr>
+  {% for event in policy_events[:20] %}
+  <tr><td>{{ event.event_type }}</td><td><code>{{ event.url or 'N/A' }}</code></td><td>{{ event.reason }}</td><td>{{ event.severity }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
 
 <h2>3. Executive Summary</h2>
 {% if report_metadata.executive_summary_note %}<p>{{ report_metadata.executive_summary_note }}</p>{% endif %}
@@ -134,7 +163,7 @@
   {% endfor %}
 </table>
 
-<h2>6. 취약점 상세</h2>
+<h2 class="section-break">6. 취약점 상세</h2>
 {% for finding in security_findings %}
 {% set fid = finding.id|string %}
 <div class="finding">
@@ -199,9 +228,9 @@
 <ul>{% for finding in previously_false_positive_findings %}<li>{{ finding.title }} - previous finding <code>{{ finding.evidence.previous_finding_id if finding.evidence else 'N/A' }}</code></li>{% endfor %}</ul>
 {% endif %}
 
-<h2>7. 증적 첨부</h2>
+<h2 class="section-break">7. 증적 첨부</h2>
 <div class="notice redaction">민감정보 원문은 보고서에 포함하지 않습니다. request/response body는 redacted preview만 표시하며, token/cookie/secret/password/API key/JWT-like 값은 redaction 처리됩니다.</div>
-<table>
+<table class="artifact-index">
   <tr><th>Type</th><th>Title</th><th>URL / Path</th><th>Hash</th><th>Screenshot</th><th>Finding</th><th>Preview</th></tr>
   {% for artifact in artifact_index[:500] %}
   <tr>

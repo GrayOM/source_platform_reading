@@ -4,6 +4,7 @@ Supports: PDF, HTML, JSON, Markdown
 Formats: KISA, OWASP, Executive Summary, Technical Full
 """
 import json
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,6 +43,7 @@ class ReportEngine:
         self.cross_scan_diff = cross_scan_diff or not_included_cross_scan_diff()
         self.report_metadata = report_metadata or {}
         self.output_dir = output_dir
+        self.last_pdf_error: str | None = None
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def generate(self, fmt: ReportFormat, report_type: ReportType) -> Path:
@@ -88,6 +90,13 @@ class ReportEngine:
         artifact_index = [self._artifact_payload(artifact) for artifact in artifacts]
         artifacts_by_finding = self._artifacts_by_finding(artifact_index)
         report_metadata = self._build_report_metadata()
+        scan_config = getattr(self.scan, "config", None) or {}
+        scan_policy = dict(scan_config.get("scan_policy") or {})
+        policy_events = list(scan_config.get("policy_events") or [])
+        policy_event_counts: dict[str, int] = {}
+        for event in policy_events:
+            event_type = str(event.get("event_type") or "unknown")
+            policy_event_counts[event_type] = policy_event_counts.get(event_type, 0) + 1
         finding_confidence = {str(f.id): self._finding_confidence(f) for f in sorted_findings}
         finding_auth_context = {
             str(f.id): self._finding_auth_context(f, artifacts_by_finding.get(str(f.id), []))
@@ -107,6 +116,9 @@ class ReportEngine:
             "project_name": getattr(getattr(self.scan, "project", None), "name", "N/A"),
             "auth_method": self._scan_auth_method(),
             "report_metadata": report_metadata,
+            "scan_policy": scan_policy,
+            "policy_events": policy_events,
+            "policy_event_counts": policy_event_counts,
             "report_type": report_type.value,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "findings": sorted_findings,
@@ -421,6 +433,8 @@ class ReportEngine:
             "risk_score": ctx["risk_score"],
             "risk_level": ctx["risk_level"],
             "report_metadata": ctx["report_metadata"],
+            "scan_policy": ctx["scan_policy"],
+            "policy_events": ctx["policy_events"],
             "severity_counts": ctx["severity_counts"],
             "triage_summary": {
                 "verified_findings_count": ctx["triage_counts"].get("verified", 0),
@@ -487,7 +501,7 @@ class ReportEngine:
             "artifacts": ctx["artifact_index"],
             "cross_scan_diff": self._json_cross_scan_diff(ctx["cross_scan_diff"]),
         }
-        path = self.output_dir / f"report_{ctx['scan_id'][:8]}.json"
+        path = self.output_dir / self.output_filename(ctx["scan_id"], ReportType.FULL, ReportFormat.JSON)
         path.write_text(json.dumps(output, indent=2, default=str), encoding="utf-8")
         return path
 
@@ -521,6 +535,22 @@ class ReportEngine:
             f"**Classification:** {ctx['report_metadata'].get('classification') or 'N/A'}  ",
             f"**Assessment Period:** {ctx['report_metadata'].get('assessment_start_date') or 'N/A'} - {ctx['report_metadata'].get('assessment_end_date') or 'N/A'}  ",
             f"**Assessment Scope:** {ctx['report_metadata'].get('assessment_scope') or 'N/A'}  ",
+            f"",
+            f"## Scan Policy Summary",
+            f"",
+            f"**Intensity:** {ctx['scan_policy'].get('intensity', 'N/A')}  ",
+            f"**Max Pages:** {ctx['scan_policy'].get('max_pages', 'N/A')}  ",
+            f"**Max Resources:** {ctx['scan_policy'].get('max_resources', 'N/A')}  ",
+            f"**Max Depth:** {ctx['scan_policy'].get('max_depth', 'N/A')}  ",
+            f"**Max Concurrency:** {ctx['scan_policy'].get('max_concurrency', 'N/A')}  ",
+            f"**Request Delay:** {ctx['scan_policy'].get('request_delay_ms', 'N/A')} ms  ",
+            f"**Same Origin Only:** {ctx['scan_policy'].get('same_origin_only', 'N/A')}  ",
+            f"**Allowed Hosts:** {', '.join(ctx['scan_policy'].get('allowed_hosts') or []) or 'N/A'}  ",
+            f"**Excluded Hosts:** {', '.join(ctx['scan_policy'].get('excluded_hosts') or []) or 'N/A'}  ",
+            f"**Excluded Paths:** {', '.join(ctx['scan_policy'].get('excluded_paths') or []) or 'N/A'}  ",
+            f"**Policy Events:** {len(ctx['policy_events'])}  ",
+            f"",
+            f"Policy limitations: automated collection is constrained by the saved scan policy. Blocked or skipped URLs are recorded as policy events and are not treated as scan failures.",
             f"",
             f"## Executive Summary",
             f"",
@@ -730,7 +760,7 @@ class ReportEngine:
             ],
         ]
 
-        path = self.output_dir / f"report_{ctx['scan_id'][:8]}.md"
+        path = self.output_dir / self.output_filename(ctx["scan_id"], ReportType.FULL, ReportFormat.MARKDOWN)
         path.write_text("\n".join(lines), encoding="utf-8")
         return path
 
@@ -773,6 +803,19 @@ class ReportEngine:
             f"- Authenticated Finding: {ctx['authenticated_findings_count']}",
             f"- Recurring Finding: {ctx['recurrence_counts']['recurring_findings_count']}",
             f"- Evidence Artifact: {ctx['evidence_summary']['total_artifacts_count']}",
+            f"- Scan Policy: {ctx['scan_policy'].get('intensity', 'N/A')} intensity, max pages {ctx['scan_policy'].get('max_pages', 'N/A')}, max resources {ctx['scan_policy'].get('max_resources', 'N/A')}",
+            f"- Policy Events: {len(ctx['policy_events'])}",
+            "",
+            "## 3-1. Scan Policy Summary",
+            "",
+            f"- Intensity: {ctx['scan_policy'].get('intensity', 'N/A')}",
+            f"- Max pages/resources/depth/concurrency: {ctx['scan_policy'].get('max_pages', 'N/A')} / {ctx['scan_policy'].get('max_resources', 'N/A')} / {ctx['scan_policy'].get('max_depth', 'N/A')} / {ctx['scan_policy'].get('max_concurrency', 'N/A')}",
+            f"- Request delay: {ctx['scan_policy'].get('request_delay_ms', 'N/A')} ms",
+            f"- Same origin only: {ctx['scan_policy'].get('same_origin_only', 'N/A')}",
+            f"- Allowed hosts: {', '.join(ctx['scan_policy'].get('allowed_hosts') or []) or 'N/A'}",
+            f"- Excluded hosts: {', '.join(ctx['scan_policy'].get('excluded_hosts') or []) or 'N/A'}",
+            f"- Excluded paths: {', '.join(ctx['scan_policy'].get('excluded_paths') or []) or 'N/A'}",
+            "자동 수집은 위 정책 범위와 제한 내에서 수행되며, 차단 또는 제외된 URL은 policy event로 기록됩니다.",
             "",
             "## 4. 인증 전/후 공격 표면 비교",
             "",
@@ -869,7 +912,7 @@ class ReportEngine:
             "- 민감정보는 redaction 처리됩니다.",
         ]
 
-        path = self.output_dir / f"report_{ctx['scan_id'][:8]}_kisa.md"
+        path = self.output_dir / self.output_filename(ctx["scan_id"], ReportType.KISA, ReportFormat.MARKDOWN)
         path.write_text("\n".join(lines), encoding="utf-8")
         return path
 
@@ -925,17 +968,42 @@ class ReportEngine:
         )
         template = jinja_env.get_template(template_name)
         html = template.render(**ctx)
-        path = self.output_dir / f"report_{ctx['scan_id'][:8]}_{report_type.value}.html"
+        path = self.output_dir / self.output_filename(ctx["scan_id"], report_type, ReportFormat.HTML)
         path.write_text(html, encoding="utf-8")
         return path
 
     def _write_pdf(self, ctx: dict, report_type: ReportType) -> Path:
+        self.last_pdf_error = None
         html_path = self._write_html(ctx, report_type)
         pdf_path = html_path.with_suffix(".pdf")
         try:
             import weasyprint
             weasyprint.HTML(filename=str(html_path)).write_pdf(str(pdf_path))
         except Exception as exc:
+            self.last_pdf_error = str(exc)
             log.warning("report.pdf_failed_falling_back_to_html", error=str(exc), html_path=str(html_path))
             return html_path
         return pdf_path
+
+    @staticmethod
+    def output_filename(scan_id: str, report_type: ReportType, fmt: ReportFormat) -> str:
+        short_id = str(scan_id)[:8]
+        suffix = "md" if fmt == ReportFormat.MARKDOWN else fmt.value
+        return f"sss_report_{short_id}_{report_type.value}.{suffix}"
+
+    @staticmethod
+    def pdf_renderer_diagnostic() -> dict:
+        try:
+            import weasyprint
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                smoke_path = Path(tmp_dir) / "weasyprint_smoke.pdf"
+                weasyprint.HTML(string="<h1>SSS PDF OK</h1><p>한글 테스트</p>").write_pdf(str(smoke_path))
+                return {
+                    "available": smoke_path.exists() and smoke_path.stat().st_size > 0,
+                    "version": getattr(weasyprint, "__version__", "unknown"),
+                    "smoke_bytes": smoke_path.stat().st_size if smoke_path.exists() else 0,
+                    "error": None,
+                }
+        except Exception as exc:
+            return {"available": False, "version": None, "smoke_bytes": 0, "error": str(exc)}

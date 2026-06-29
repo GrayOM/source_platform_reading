@@ -32,6 +32,8 @@ class Report(Base):
     format: Mapped[ReportFormat] = mapped_column(Enum(ReportFormat), nullable=False)
     report_type: Mapped[ReportType] = mapped_column(Enum(ReportType), nullable=False)
     report_metadata: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    report_status: Mapped[str] = mapped_column(String(50), default="queued", nullable=False)
+    error_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     file_size: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(

@@ -1,4 +1,5 @@
 import uuid
+import hashlib
 import json
 import zipfile
 from pathlib import Path
@@ -137,22 +138,76 @@ async def export_evidence_bundle(scan_id: uuid.UUID, current_user: CurrentUser, 
     artifact_index_path.write_text(json.dumps(ctx["artifact_index"], indent=2, default=str), encoding="utf-8")
     report_metadata_path = output_dir / "report_metadata.json"
     report_metadata_path.write_text(json.dumps(ctx["report_metadata"], indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    scan_policy_path = output_dir / "scan_policy.json"
+    scan_policy_path.write_text(json.dumps(ctx["scan_policy"], indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    policy_events_path = output_dir / "policy_events.json"
+    policy_events_path.write_text(json.dumps(ctx["policy_events"], indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    manifest_path = output_dir / "manifest.json"
+    readme_path = output_dir / "README.txt"
 
-    bundle_path = output_dir / f"evidence_bundle_{str(scan.id)[:8]}.zip"
+    short_id = str(scan.id)[:8]
+    bundle_path = output_dir / f"sss_evidence_bundle_{short_id}.zip"
+    files: list[tuple[Path, str]] = [
+        (html_report, "reports/full_report.html"),
+        (kisa_html_report, "reports/kisa_report.html"),
+        (markdown_report, "reports/summary.md"),
+        (json_report, "reports/report.json"),
+        (report_metadata_path, "reports/report_metadata.json"),
+        (scan_policy_path, "reports/scan_policy.json"),
+        (policy_events_path, "reports/policy_events.json"),
+        (artifact_index_path, "evidence/artifact_index.json"),
+        (kisa_html_report, "kisa_report.html"),
+        (kisa_markdown_report, "kisa_summary.md"),
+        (artifact_index_path, "artifact_index.json"),
+        (report_metadata_path, "report_metadata.json"),
+        (scan_policy_path, "scan_policy.json"),
+        (policy_events_path, "policy_events.json"),
+    ]
+    checksums = {arcname: _sha256_file(path) for path, arcname in files}
+    screenshot_entries: list[tuple[Path, str]] = []
+    for artifact in scan.evidence_artifacts:
+        screenshot_path = Path(artifact.screenshot_path) if artifact.screenshot_path else None
+        if screenshot_path and screenshot_path.exists() and screenshot_path.is_file():
+            arcname = f"evidence/screenshots/{screenshot_path.name}"
+            screenshot_entries.append((screenshot_path, arcname))
+            checksums[arcname] = _sha256_file(screenshot_path)
+            legacy_arcname = f"screenshots/{screenshot_path.name}"
+            screenshot_entries.append((screenshot_path, legacy_arcname))
+            checksums[legacy_arcname] = checksums[arcname]
+    preview_entries = _preview_entries(ctx["artifact_index"])
+    for arcname, content in preview_entries:
+        checksums[arcname] = _sha256_bytes(content)
+
+    readme_path.write_text(_bundle_readme(ctx), encoding="utf-8")
+    checksums["README.txt"] = _sha256_file(readme_path)
+    manifest = {
+        "generated_at": ctx["generated_at"],
+        "scan_id": str(scan.id),
+        "target_url": scan.target_url,
+        "report_type": "kisa",
+        "formats_included": ["html", "markdown", "json"],
+        "redaction_applied": True,
+        "artifact_count": len(ctx["artifact_index"]),
+        "policy_event_count": len(ctx["policy_events"]),
+        "screenshot_count": len({arc for _path, arc in screenshot_entries if arc.startswith("evidence/screenshots/")}),
+        "checksums": checksums,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+
     with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for path in (json_report, markdown_report, html_report, artifact_index_path, report_metadata_path):
-            zf.write(path, arcname=path.name)
-        zf.write(kisa_html_report, arcname="kisa_report.html")
-        zf.write(kisa_markdown_report, arcname="kisa_summary.md")
-        for artifact in scan.evidence_artifacts:
-            screenshot_path = Path(artifact.screenshot_path) if artifact.screenshot_path else None
-            if screenshot_path and screenshot_path.exists() and screenshot_path.is_file():
-                zf.write(screenshot_path, arcname=f"screenshots/{screenshot_path.name}")
+        for path, arcname in files:
+            zf.write(path, arcname=arcname)
+        zf.write(manifest_path, arcname="manifest.json")
+        zf.write(readme_path, arcname="README.txt")
+        for path, arcname in screenshot_entries:
+            zf.write(path, arcname=arcname)
+        for arcname, content in preview_entries:
+            zf.writestr(arcname, content)
 
     return FileResponse(
         path=str(bundle_path),
         media_type="application/zip",
-        filename=bundle_path.name,
+        filename=f"sss_evidence_bundle_{short_id}.zip",
     )
 
 
@@ -177,5 +232,66 @@ async def download_report(report_id: uuid.UUID, current_user: CurrentUser, db: D
     return FileResponse(
         path=report.file_path,
         media_type=media_types.get(media_format, "application/octet-stream"),
-        filename=file_path.name,
+        filename=_download_filename(report, file_path),
+    )
+
+
+def _download_filename(report: Report, file_path: Path) -> str:
+    suffix = file_path.suffix.lower().lstrip(".") or report.format.value
+    if suffix == "md":
+        suffix = "md"
+    return f"sss_report_{str(report.scan_id)[:8]}_{report.report_type.value}.{suffix}"
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _sha256_bytes(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _preview_entries(artifact_index: list[dict]) -> list[tuple[str, str]]:
+    entries: list[tuple[str, str]] = []
+    for artifact in artifact_index:
+        preview = artifact.get("redacted_body_preview") or artifact.get("redacted_value")
+        if preview:
+            artifact_id = artifact.get("id") or f"artifact-{len(entries) + 1}"
+            entries.append((f"evidence/previews/{artifact_id}.txt", str(preview)[:4000]))
+    return entries
+
+
+def _bundle_readme(ctx: dict) -> str:
+    limitations = ctx["report_metadata"].get("limitations") or []
+    limitation_lines = "\n".join(f"- {item}" for item in limitations) or "- N/A"
+    policy = ctx.get("scan_policy") or {}
+    return "\n".join(
+        [
+            "SSS Evidence Bundle",
+            "",
+            f"Generated at: {ctx['generated_at']}",
+            f"Target URL: {ctx['target_url']}",
+            f"Scan ID: {ctx['scan_id']}",
+            f"Report type: kisa",
+            "",
+            "Redaction notice:",
+            "Sensitive raw values are not intentionally included. Reports and previews use redacted values, hashes, and paths.",
+            "",
+            "Artifact layout:",
+            "- reports/: rendered reports, report metadata, scan policy, and policy events",
+            "- evidence/artifact_index.json: structured artifact index",
+            "- evidence/screenshots/: screenshot artifacts when available",
+            "- evidence/previews/: redacted text previews when available",
+            "",
+            "Scan policy:",
+            f"- Intensity: {policy.get('intensity') or 'N/A'}",
+            f"- Limits: pages {policy.get('max_pages') or 'N/A'}, resources {policy.get('max_resources') or 'N/A'}, depth {policy.get('max_depth') or 'N/A'}, concurrency {policy.get('max_concurrency') or 'N/A'}",
+            f"- Allowed hosts: {', '.join(policy.get('allowed_hosts') or []) or 'N/A'}",
+            f"- Excluded paths: {', '.join(policy.get('excluded_paths') or []) or 'N/A'}",
+            f"- Policy events: {len(ctx.get('policy_events') or [])}",
+            "",
+            "Limitations:",
+            limitation_lines,
+            "",
+        ]
     )
