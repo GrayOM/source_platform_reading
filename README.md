@@ -2,42 +2,34 @@
 
 [![CI](https://github.com/GrayOM/source_platform_reading/actions/workflows/ci.yml/badge.svg)](https://github.com/GrayOM/source_platform_reading/actions/workflows/ci.yml)
 
-SSS Platform은 브라우저에서 접근 가능한 웹 리소스와 API 흐름을 수집·분석해 보안 점검 결과와 보고서를 생성하는 웹 애플리케이션 보안 분석 MVP입니다.
+SSS Platform은 브라우저에서 접근 가능한 웹 리소스와 API 흐름을 수집하고, 자동 분석 결과를 triage와 evidence 중심 보고서로 정리하는 Dockerized 웹 보안 진단 플랫폼입니다. URL 기반 No Auth scan, Browser Login scan, Cross-scan Auth Delta 비교, finding triage, fingerprint/recurrence tracking, evidence artifact, KISA/Full/Markdown/JSON/PDF report, evidence bundle export를 지원합니다.
 
-대상 URL을 입력하면 Playwright 기반 크롤러가 페이지, JavaScript, source map, XHR/fetch 후보 등을 수집하고, 정적 분석 에이전트가 DOM XSS 후보, postMessage 처리, 브라우저 저장소 토큰 사용, API endpoint 노출, source map 노출, secret/token 후보를 finding으로 정리합니다. 결과는 웹 UI에서 확인하고 HTML, Markdown, JSON 보고서로 다운로드할 수 있습니다.
+SSS는 서버 내부 원본 소스코드를 가져오는 도구가 아닙니다. Playwright 브라우저가 접근할 수 있는 페이지, JavaScript, source map, XHR/fetch 흐름, storage 사용, 응답 메타데이터와 같은 클라이언트 관측 가능 자료를 바탕으로 분석합니다.
 
-> 이 프로젝트는 허가받은 보안 테스트와 포트폴리오 데모 목적의 MVP입니다. 허가받지 않은 시스템을 대상으로 스캔하지 마세요.
+> 허가받은 대상에만 사용하세요. SSS는 무차별 요청, 공격 자동화, exploit 실행, credential stuffing, brute force, fuzzing 도구가 아닙니다.
 
-## 현재 상태
+## 주요 기능
 
-검증된 MVP 범위:
+- URL 기반 scan: 공개 페이지와 브라우저에서 관측 가능한 리소스/API 흐름을 수집합니다.
+- Browser Login scan: 제어된 브라우저 로그인 세션을 캡처한 뒤 인증 상태에서 크롤링합니다.
+- Cross-scan Auth Delta: No Auth scan과 Browser Login scan을 비교해 인증 후 새로 보이는 attack surface 후보를 정리합니다.
+- Finding triage: `candidate`, `verified`, `false_positive` 상태와 analyst note를 관리합니다.
+- Fingerprint/recurrence tracking: 같은 프로젝트 내 반복 finding을 fingerprint로 연결하고 이전 verified/false positive 상태를 표시합니다.
+- Evidence Artifact: finding별 근거, redacted preview, screenshot, request/response context를 구조화합니다.
+- Report export: Full, KISA, OWASP, Executive, Technical report type과 HTML, Markdown, JSON, PDF format을 지원합니다.
+- Evidence bundle: 보고서, artifact index, redacted preview, screenshot, manifest, checksum을 ZIP으로 묶어 내보냅니다.
+- Report Metadata Builder: 고객사, 서비스명, 작성자, 진단 범위, 제한 사항, 문서 분류 등 실무 보고서 필드를 입력합니다.
+- Scan Policy/Safety Guardrails: low/normal/careful profile, page/resource/depth/concurrency 제한, same-origin, allowed/excluded host/path, private target, outside-scope redirect 정책을 기록합니다.
 
-- Docker Compose 기반 실행
-- 회원가입 / 로그인
-- 프로젝트 생성
-- No Auth 스캔 생성
-- Playwright 기반 크롤링
-- WebSocket 기반 스캔 진행 상태 표시
-- Finding 목록 및 상세 확인
-- `code_snippet`, `poc`, `reproduction_steps` 표시
-- HTML / Markdown / JSON 보고서 생성 및 다운로드
-- E2E 검증용 vulnerable-site profile 제공
+## 안전 범위
 
-최근 검증 결과:
-
-- `docker compose config` 통과
-- `docker compose build` 통과
-- `docker compose --profile e2e up -d` 통과
-- `backend`: `36 passed`
-- `frontend`: `npm run build` 통과
-- 실제 브라우저 E2E 통과
-
-GitHub Actions CI:
-
-- Backend: Python 3.12 dependency install, `compileall`, `pytest`
-- Frontend: Node.js 20, `npm ci`, `npm run build`
-- Docker Compose: default config, `.env.example` + `e2e` profile config, compose image build
-- CI는 API key 없이 deterministic round1 테스트 중심으로 통과하도록 구성되어 있습니다.
+- 소유하거나 명시적으로 허가받은 시스템만 스캔하세요.
+- 자동 탐지 결과는 검증 후보입니다. 특히 API endpoint exposure는 권한 우회 확정이 아니라 추가 검증이 필요한 노출 후보입니다.
+- `candidate` finding은 triage가 필요하며, `verified`만 분석자가 확인한 항목으로 취급하세요.
+- `false_positive`는 보고서에서 분리되어 조치 대상과 구분됩니다.
+- private target은 기본적으로 차단됩니다. 로컬 E2E/dev 대상은 `SSRF_ALLOWED_HOSTS`로 명시된 host만 허용하는 구성을 사용합니다.
+- outside-scope link/redirect, excluded host/path, max limit 도달, timeout 등은 `policy_events`로 남고 보고서와 evidence bundle에 포함됩니다.
+- 문서와 테스트 데이터에는 실제 secret-like literal을 넣지 마세요. 예시는 `<REDACTED_TOKEN>`처럼 표현합니다.
 
 ## Architecture
 
@@ -62,249 +54,85 @@ Nginx reverse proxy
 
 - `backend`: FastAPI, SQLAlchemy, Alembic, Celery
 - `frontend`: React, Vite, React Query, Axios
-- `worker-browser`: Playwright 크롤링 및 브라우저 기반 수집
-- `worker`: 분석 및 보고서 생성
-- `postgres`: 스캔, finding, report 메타데이터 저장
+- `worker-browser`: Playwright 기반 크롤링, browser login, resource/API collection
+- `worker`: 분석, report generation, evidence bundle generation
+- `postgres`: 프로젝트, 스캔, finding, artifact, report 메타데이터 저장
 - `redis`: Celery broker/result backend 및 progress pub/sub
-- `nginx`: 프론트엔드 / API / WebSocket reverse proxy
+- `nginx`: frontend/API/WebSocket reverse proxy
 
 ## Requirements
 
 - Docker 24+
 - Docker Compose v2+
-- Node.js 20+ and Python 3.12+ only for local development
+- Node.js 20+ and Python 3.12+ for local development
 
-AI API key는 선택 사항입니다. 현재 MVP의 핵심 E2E finding은 deterministic analyzer로 생성됩니다. `ANTHROPIC_API_KEY`가 비어 있거나 placeholder 값이면 AI round2 분석은 실패가 아니라 `AI analysis skipped - API key not configured` 상태로 건너뛰며, deterministic round1 finding과 보고서 생성은 계속 동작합니다. AI round2 분석을 사용하려면 별도 API key 설정이 필요합니다.
+AI API key는 선택 사항입니다. API key가 없거나 placeholder이면 deterministic analyzer와 보고서 생성은 계속 동작하고, AI 기반 보조 분석만 건너뜁니다.
 
 ## Quick Start
 
-```bash
-docker compose build
-docker compose up -d
-```
-
-기본 개발값은 `docker-compose.yml`에 포함되어 있어 로컬 데모는 `.env` 없이도 실행할 수 있습니다. 값을 명시적으로 관리하려면 다음처럼 예시 파일을 복사해 사용하세요.
+전체 절차는 [docs/quickstart.md](docs/quickstart.md)에 정리되어 있습니다.
 
 ```bash
+git clone https://github.com/GrayOM/source_platform_reading.git
+cd source_platform_reading
 cp .env.example .env
+docker compose config
+DOCKER_CONFIG=/tmp/docker-empty-config docker compose build backend worker worker-browser
+DOCKER_CONFIG=/tmp/docker-empty-config docker compose build frontend
+docker compose --profile e2e up -d
+docker compose ps
 ```
+
+Docker credential helper 오류가 나면 `DOCKER_CONFIG=/tmp/docker-empty-config`를 붙여 빌드하세요.
 
 접속:
 
 - Web UI: `http://localhost`
 - Swagger UI: `http://localhost/api/docs`
 - ReDoc: `http://localhost/api/redoc`
+- Demo vulnerable-site from host browser: `http://localhost:8081`
+- Demo target URL from SSS container network: `http://vulnerable-site`
 
-서비스 상태와 로그:
-
-```bash
-docker compose ps
-docker compose logs --tail=100 backend
-docker compose logs --tail=100 worker
-docker compose logs --tail=100 worker-browser
-```
-
-중지:
-
-```bash
-docker compose down
-```
-
-데이터까지 초기화:
-
-```bash
-docker compose down -v
-```
-
-## Environment
-
-주요 환경변수:
-
-| 변수 | 기본값 / 예시 | 설명 |
-|---|---|---|
-| `POSTGRES_USER` | `sss` | PostgreSQL 사용자 |
-| `POSTGRES_PASSWORD` | `change_me_strong_password` | PostgreSQL 비밀번호 |
-| `POSTGRES_DB` | `sss_platform` | 기본 DB |
-| `SECRET_KEY` | dev 기본값 제공 | JWT 서명 키 |
-| `FERNET_KEY` | dev 기본값 제공 | 세션 데이터 암호화 키 |
-| `ENVIRONMENT` | `development` | 실행 환경 |
-| `SCAN_DATA_PATH` | `/data/scans` | 수집 리소스와 보고서 저장 경로 |
-| `SSRF_ALLOWED_HOSTS` | Compose 기본값: `vulnerable-site,host.docker.internal` | development/e2e/test에서만 허용되는 테스트 host |
-| `ALLOW_PRIVATE_TARGETS` | `false` | 기본값은 private target 차단 |
-| `ANTHROPIC_API_KEY` | empty | AI round2 분석용 선택 값 |
-
-SSRF 정책:
-
-- 기본적으로 `localhost`, loopback, private IP, link-local, reserved IP는 차단합니다.
-- 운영 기본값은 private target 차단입니다.
-- E2E/dev 편의를 위해 `SSRF_ALLOWED_HOSTS`에 명시된 host만 `development`, `e2e`, `test` 환경에서 허용합니다.
-- `ALLOW_PRIVATE_TARGETS=false`가 기본값입니다.
-
-## Demo Flow
-
-브라우저에서 다음 흐름으로 MVP를 확인할 수 있습니다.
+기본 데모 흐름:
 
 1. `http://localhost` 접속
-2. 회원가입
-3. 로그인
-4. `Projects`에서 새 프로젝트 생성
-5. `New Scan` 생성
-6. Target URL 입력
-7. Authentication에서 `No Auth` 선택
-8. Crawl settings 확인
-9. `Start Scan`
-10. 스캔 완료 후 `View Findings`
-11. Finding 상세에서 evidence, code snippet, PoC, reproduction steps 확인
-12. `Generate Report`
-13. HTML / Markdown / JSON 보고서 생성
-14. 각 보고서 다운로드
+2. 회원가입 후 로그인
+3. 프로젝트 생성
+4. Target URL `http://vulnerable-site`로 No Auth scan 실행
+5. Browser Login scan 실행
+6. Cross-scan compare 대상 선택 후 report 생성
+7. HTML/KISA/PDF/Markdown/JSON report 다운로드
+8. Evidence bundle 다운로드 후 `manifest.json`, `reports/`, `evidence/` 확인
 
-## Screenshots
+## Documentation
 
-| Login | Dashboard |
-|---|---|
-| ![Login](docs/screenshots/login.png) | ![Dashboard](docs/screenshots/dashboard.png) |
-
-| Scan wizard | Scan detail |
-|---|---|
-| ![Scan create](docs/screenshots/scan-create.png) | ![Scan detail](docs/screenshots/scan-detail.png) |
-
-| Findings | Finding detail |
-|---|---|
-| ![Findings](docs/screenshots/findings.png) | ![Finding detail](docs/screenshots/finding-detail.png) |
-
-| Reports | Mobile login |
-|---|---|
-| ![Reports](docs/screenshots/reports.png) | ![Mobile login](docs/screenshots/mobile-login.png) |
+- [Quick Start](docs/quickstart.md): clone부터 demo scan, report, evidence bundle 확인까지의 실행 절차
+- [Reporting](docs/reporting.md): report type/format, PDF fallback, metadata, evidence bundle, redaction, verified/candidate 문구
+- [Scan Policy](docs/scan-policy.md): safety profile, limits, scope controls, private target, redirect outside-scope, policy events
+- [Developer Verification](docs/verification.md): Docker build, E2E fixture, backend pytest, frontend build, WeasyPrint smoke, secret-like grep
+- [Architecture](docs/architecture.md): 시스템 구성과 데이터 흐름
 
 ## E2E Vulnerable Site
 
-로컬 데모와 회귀 검증을 위해 의도적으로 취약한 테스트 타겟을 제공합니다. 이 타겟은 SSS 탐지 기능 검증용이며 외부 공격 목적이 아닙니다.
-
-기동:
+로컬 데모와 회귀 검증을 위해 의도적으로 취약한 테스트 타겟을 제공합니다.
 
 ```bash
 docker compose --profile e2e up -d vulnerable-site
 ```
 
-전체 스택과 함께 실행:
+테스트 URL:
 
-```bash
-docker compose --profile e2e up -d
-```
+- SSS scan target: `http://vulnerable-site`
+- Host browser preview: `http://localhost:8081`
 
-테스트 타겟:
+주요 route:
 
-- 컨테이너 내부 target URL: `http://vulnerable-site`
-- 호스트 브라우저 확인 URL: `http://localhost:8081`
-
-E2E 스캔 권장 설정:
-
-- Project: 임의 프로젝트
-- Target URL: `http://vulnerable-site`
-- Auth: `No Auth`
-- Max Depth: `2`
-- Max Pages: `10`
-- Analyze Source Maps: enabled
-
-테스트 페이지에는 다음 신호가 포함되어 있습니다.
-
-- DOM XSS 후보
-- `postMessage` handler
-- `localStorage` / `sessionStorage` token-like value
-- `//# sourceMappingURL=/app.js.map`
-- `/api/profile?include=roles`
-- `/api/orders/42`
-- bearer token 형태의 client-side header
-
-## Detectable Finding Types
-
-현재 MVP에서 검증된 finding 유형:
-
-| 유형 | 설명 | 대표 finding |
-|---|---|---|
-| DOM XSS candidate | URL hash/query 또는 message data가 위험한 DOM sink로 흐르는 패턴 | `Potential DOM XSS data flow in JavaScript` |
-| postMessage origin validation candidate | `message` event handler 주변에 명시적 `event.origin` 검증이 보이지 않는 패턴 | `postMessage handler without visible origin validation` |
-| Insecure storage | token/JWT/access token 후보가 `localStorage` 또는 `sessionStorage`에서 사용되는 패턴 | `Token-like value stored in browser storage` |
-| Source map exposure | production-like asset에서 source map이 접근 가능한 상태 | `Source map file is accessible` |
-| API endpoint exposure | browser traffic 또는 JS bundle에서 API endpoint 후보가 발견되는 상태 | `API endpoint exposed in client-side flow` |
-| Secret/token candidate | JS/HTML/JSON/source map 내 key, token, JWT, secret-like string 후보 | `API key`, `JWT Token`, `Generic Secret` 등 |
-
-Finding 상세에는 가능한 경우 다음 필드가 포함됩니다.
-
-- `code_snippet`
-- `poc`
-- `reproduction_steps`
-- `affected_url`
-- `evidence`
-- `recommendation`
-- CWE / CVSS / OWASP mapping
-
-## Reports
-
-보고서는 scan이 `completed` 상태일 때 생성할 수 있습니다.
-
-지원 형식:
-
-- `HTML`: 브라우저로 열어보기 좋은 전체 보고서
-- `Markdown`: 이슈, PR, 문서 저장소에 첨부하기 좋은 형식
-- `JSON`: 다른 도구와 연동하기 위한 구조화 데이터
-- `PDF`: 실험적 지원. PDF 렌더링이 실패하면 같은 내용의 HTML report path로 fallback하며, HTML/Markdown/JSON 보고서 기능은 막지 않습니다.
-
-검증된 다운로드 형식:
-
-- HTML
-- Markdown
-- JSON
-
-보고서에는 finding별로 다음 정보가 포함됩니다.
-
-- 심각도
-- 취약점 유형
-- 설명
-- evidence / code snippet
-- PoC
-- reproduction steps
-- recommendation
-- collection summary
-
-## Local Development
-
-백엔드 테스트:
-
-```bash
-cd backend
-.venv/bin/python -m pytest tests/ -v
-```
-
-프론트엔드 빌드:
-
-```bash
-cd frontend
-npm install
-npm run build
-```
-
-Python import smoke:
-
-```bash
-cd backend
-.venv/bin/python -m compileall app tests
-```
-
-Docker 검증:
-
-```bash
-docker compose config
-docker compose build
-docker compose --profile e2e up -d
-```
-
-`make test`도 제공되지만, 로컬 환경에 따라 `python` 명령이 없을 수 있습니다. 그 경우 위의 `.venv/bin/python -m pytest tests/ -v` 명령을 사용하세요.
+- `/login/`: Browser Login scan용 로그인 fixture
+- `/outside-link/`: outside-scope link 차단 확인
+- `/mixed-scope/`: same-origin과 outside-scope link 혼합 fixture
+- `/redirect-outside`: outside-scope redirect 차단 확인
 
 ## API Overview
-
-주요 API:
 
 ```text
 POST   /api/v1/auth/register
@@ -319,16 +147,56 @@ POST   /api/v1/scans
 GET    /api/v1/scans/{scan_id}
 POST   /api/v1/scans/{scan_id}/cancel
 POST   /api/v1/scans/{scan_id}/browser-auth/start
+GET    /api/v1/scans/{scan_id}/diff-candidates
 
 GET    /api/v1/findings
 PATCH  /api/v1/findings/{finding_id}
 
 GET    /api/v1/reports/scans/{scan_id}
 POST   /api/v1/reports/scans/{scan_id}/generate
+POST   /api/v1/reports/scans/{scan_id}/evidence-bundle
 GET    /api/v1/reports/{report_id}/download
 
-WS     /ws/scans/{scan_id}?token=<jwt>
+WS     /ws/scans/{scan_id}?token=<REDACTED_TOKEN>
 ```
+
+## Local Development
+
+```bash
+make setup
+make dev
+make test
+make lint
+```
+
+직접 검증:
+
+```bash
+cd backend
+.venv/bin/python -m pytest tests/ -v
+
+cd ../frontend
+npm run build
+```
+
+릴리즈 검증 절차는 [docs/verification.md](docs/verification.md)를 기준으로 실행하세요.
+
+## Environment
+
+| 변수 | 기본값 / 예시 | 설명 |
+|---|---|---|
+| `POSTGRES_USER` | `sss` | PostgreSQL 사용자 |
+| `POSTGRES_PASSWORD` | dev 기본값 | PostgreSQL 비밀번호 |
+| `POSTGRES_DB` | `sss_platform` | 기본 DB |
+| `SECRET_KEY` | dev 기본값 | JWT 서명 키 |
+| `FERNET_KEY` | dev 기본값 | 세션 데이터 암호화 키 |
+| `ENVIRONMENT` | `development` | 실행 환경 |
+| `SCAN_DATA_PATH` | `/data/scans` | 수집 리소스와 보고서 저장 경로 |
+| `SSRF_ALLOWED_HOSTS` | `vulnerable-site,host.docker.internal` | development/e2e/test에서 허용되는 테스트 host |
+| `ALLOW_PRIVATE_TARGETS` | `false` | private target 허용 여부 |
+| `ANTHROPIC_API_KEY` | empty | 선택 AI 분석 키 |
+
+운영 또는 외부 대상 테스트에서는 `SECRET_KEY`, `FERNET_KEY`, DB password, 허용 host, private target 정책을 반드시 환경에 맞게 변경하세요.
 
 ## Project Structure
 
@@ -337,79 +205,45 @@ WS     /ws/scans/{scan_id}?token=<jwt>
 ├── backend/
 │   ├── alembic/
 │   ├── app/
-│   │   ├── api/
+│   │   ├── api/v1/
 │   │   ├── core/
 │   │   ├── models/
 │   │   ├── schemas/
 │   │   ├── services/
-│   │   │   ├── analysis/
-│   │   │   ├── auth/
-│   │   │   ├── collector/
-│   │   │   ├── crawler/
-│   │   │   └── report/
 │   │   └── workers/
 │   └── tests/
-├── e2e/
-│   └── vulnerable-site/
-├── frontend/
-│   └── src/
-├── infra/
-│   └── nginx/
+├── docs/
+├── e2e/vulnerable-site/
+├── frontend/src/
+├── infra/nginx/
 ├── docker-compose.yml
 └── README.md
 ```
 
 ## Troubleshooting
 
-### Backend migration
-
-backend entrypoint runs:
+Docker credential helper 오류:
 
 ```bash
-alembic upgrade head
+DOCKER_CONFIG=/tmp/docker-empty-config docker compose build backend worker worker-browser
+DOCKER_CONFIG=/tmp/docker-empty-config docker compose build frontend
 ```
 
-If migration fails, backend logs include an explicit entrypoint message:
-
-```bash
-docker compose logs --tail=100 backend
-```
-
-### Existing Docker volume password mismatch
-
-If a previous Postgres volume was created with a different password, reset volumes:
+기존 Postgres volume password mismatch:
 
 ```bash
 docker compose down -v
-docker compose up -d
+docker compose --profile e2e up -d
 ```
 
-### Nginx upstream after container recreation
-
-Nginx uses Docker DNS resolver (`127.0.0.11`) so recreated backend/frontend containers are resolved dynamically. If a stale connection appears during local development:
+로그 확인:
 
 ```bash
-docker compose restart nginx
+docker compose logs --tail=100 backend
+docker compose logs --tail=100 worker
+docker compose logs --tail=100 worker-browser
 ```
-
-### Host browser cannot reach localhost in WSL
-
-The application may be reachable inside the Docker network even if the shell cannot `curl localhost`. Check from a container:
-
-```bash
-docker exec source_platform_reading-nginx-1 wget -qO- http://backend:8000/health
-```
-
-## TODO
-
-MVP 이후 남은 작업:
-
-- Verify Celery non-root worker behavior across more deployment targets
-- Frontend design and UX polish
-- Improve native PDF rendering stability beyond the current HTML fallback
-- Broader browser-auth E2E coverage
-- More precise false-positive reduction for static findings
 
 ## License and Responsible Use
 
-Use this project only on systems you own or have explicit permission to test. The scanner collects and analyzes browser-accessible resources and API flows; it is not intended for unauthorized scanning.
+Use this project only on systems you own or have explicit permission to test. SSS collects and analyzes browser-accessible resources and API flows; it is not intended for unauthorized scanning or exploitation.
