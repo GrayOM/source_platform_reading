@@ -1,4 +1,4 @@
-.PHONY: help setup dev test lint build clean
+.PHONY: help setup dev test lint build verify-release clean
 
 help:
 	@echo "SSS Platform"
@@ -7,6 +7,7 @@ help:
 	@echo "  make test        Run backend tests"
 	@echo "  make lint        Run linters"
 	@echo "  make build       Build Docker images"
+	@echo "  make verify-release Run release verification checks"
 	@echo "  make up          Start full stack via docker-compose"
 	@echo "  make down        Stop docker-compose"
 	@echo "  make migrate     Run alembic migrations"
@@ -36,6 +37,9 @@ lint:
 
 build:
 	docker compose build
+
+verify-release:
+	./scripts/verify_release.sh
 
 up:
 	docker compose up -d

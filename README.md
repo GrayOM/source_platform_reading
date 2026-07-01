@@ -110,6 +110,7 @@ Docker credential helper 오류가 나면 `DOCKER_CONFIG=/tmp/docker-empty-confi
 - [Reporting](docs/reporting.md): report type/format, PDF fallback, metadata, evidence bundle, redaction, verified/candidate 문구
 - [Scan Policy](docs/scan-policy.md): safety profile, limits, scope controls, private target, redirect outside-scope, policy events
 - [Developer Verification](docs/verification.md): Docker build, E2E fixture, backend pytest, frontend build, WeasyPrint smoke, secret-like grep
+- [Release Checklist](docs/release-checklist.md): v1.x release freeze, verification, manual demo, and publish checklist
 - [Architecture](docs/architecture.md): 시스템 구성과 데이터 흐름
 
 ## E2E Vulnerable Site

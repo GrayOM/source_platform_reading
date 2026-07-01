@@ -4,6 +4,14 @@
 
 ## Docker Compose
 
+Full scripted verification:
+
+```bash
+make verify-release
+```
+
+Manual verification:
+
 ```bash
 docker compose config
 DOCKER_CONFIG=/tmp/docker-empty-config timeout 300 docker compose build backend worker worker-browser
