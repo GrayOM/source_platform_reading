@@ -104,6 +104,46 @@ Docker credential helper 오류가 나면 `DOCKER_CONFIG=/tmp/docker-empty-confi
 7. HTML/KISA/PDF/Markdown/JSON report 다운로드
 8. Evidence bundle 다운로드 후 `manifest.json`, `reports/`, `evidence/` 확인
 
+## Local Demo Model
+
+SSS is designed to be run as a local demo or controlled internal tool. Start it only when testing or demonstrating the platform, then stop the containers when finished.
+
+기본 실행:
+
+```bash
+docker compose --profile e2e up -d
+```
+
+종료:
+
+```bash
+docker compose down
+```
+
+데이터까지 초기화하고 싶을 때:
+
+```bash
+docker compose down -v
+```
+
+GitHub Releases are used to mark stable versions of SSS. They do not host the running backend, workers, database, or Redis services.
+
+For an always-on deployment, SSS must run on a VPS or cloud server with Docker Compose or another container runtime. For portfolio and demo purposes, the recommended mode is local demo execution.
+
+Do not expose SSS as a public scanner unless authentication, authorization, abuse controls, rate limits, quotas, and audit logging are properly configured. Use it only on systems you own or are explicitly authorized to assess.
+
+## Screenshots
+
+로컬 데모 실행 후 주요 화면은 아래와 같습니다.
+
+![SSS dashboard](docs/screenshots/dashboard.png)
+
+![Scan creation](docs/screenshots/scan-create.png)
+
+![Finding detail](docs/screenshots/finding-detail.png)
+
+![Reports](docs/screenshots/reports.png)
+
 ## Documentation
 
 - [Quick Start](docs/quickstart.md): clone부터 demo scan, report, evidence bundle 확인까지의 실행 절차
