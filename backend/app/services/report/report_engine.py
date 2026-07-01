@@ -50,7 +50,7 @@ class ReportEngine:
         context = self._build_context(report_type)
 
         if fmt == ReportFormat.JSON:
-            return self._write_json(context)
+            return self._write_json(context, report_type)
         elif fmt == ReportFormat.MARKDOWN:
             return self._write_markdown(context, report_type)
         elif fmt == ReportFormat.HTML:
@@ -425,7 +425,7 @@ class ReportEngine:
                 grouped.setdefault(finding_id, []).append(artifact)
         return grouped
 
-    def _write_json(self, ctx: dict) -> Path:
+    def _write_json(self, ctx: dict, report_type: ReportType) -> Path:
         output = {
             "scan_id": ctx["scan_id"],
             "target_url": ctx["target_url"],
@@ -501,7 +501,7 @@ class ReportEngine:
             "artifacts": ctx["artifact_index"],
             "cross_scan_diff": self._json_cross_scan_diff(ctx["cross_scan_diff"]),
         }
-        path = self.output_dir / self.output_filename(ctx["scan_id"], ReportType.FULL, ReportFormat.JSON)
+        path = self.output_dir / self.output_filename(ctx["scan_id"], report_type, ReportFormat.JSON)
         path.write_text(json.dumps(output, indent=2, default=str), encoding="utf-8")
         return path
 

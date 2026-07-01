@@ -197,6 +197,13 @@ def test_json_report_includes_kisa_report_metadata(tmp_path):
     assert metadata["redaction_applied"] is True
 
 
+def test_json_report_filename_uses_report_type(tmp_path):
+    scan, findings = _report_fixture()
+    path = ReportEngine(scan, findings, tmp_path).generate(ReportFormat.JSON, ReportType.KISA)
+
+    assert path.name == f"sss_report_{str(scan.id)[:8]}_kisa.json"
+
+
 def test_kisa_markdown_and_existing_full_outputs_still_generate(tmp_path):
     scan, findings = _report_fixture()
     engine = ReportEngine(scan, findings, tmp_path, report_metadata={"client_name": "Markdown Client"})
@@ -333,16 +340,29 @@ async def test_evidence_bundle_contains_kisa_report_and_artifact_index(monkeypat
             report_type=ReportType.KISA,
             report_metadata={"client_name": "Bundle Client", "service_name": "Bundle Service"},
         )
+        screenshot_dir = tmp_path / str(scan.id) / "screenshots"
+        screenshot_dir.mkdir(parents=True)
+        allowed_screenshot = screenshot_dir / "shot.png"
+        outside_screenshot = tmp_path / "outside-shot.png"
+        allowed_screenshot.write_bytes(b"png")
+        outside_screenshot.write_bytes(b"outside")
         screenshot = FindingEvidenceArtifact(
             scan=scan,
             finding=finding,
             artifact_type=EvidenceArtifactType.SCREENSHOT,
             title="Screenshot",
-            screenshot_path=str(tmp_path / "shot.png"),
+            screenshot_path=str(allowed_screenshot),
             auth_context="authenticated",
         )
-        (tmp_path / "shot.png").write_bytes(b"png")
-        db.add_all([user, project, scan, finding, screenshot, report])
+        outside_artifact = FindingEvidenceArtifact(
+            scan=scan,
+            finding=finding,
+            artifact_type=EvidenceArtifactType.SCREENSHOT,
+            title="Outside screenshot",
+            screenshot_path=str(outside_screenshot),
+            auth_context="authenticated",
+        )
+        db.add_all([user, project, scan, finding, screenshot, outside_artifact, report])
         await db.commit()
         scan_id = scan.id
 
@@ -366,6 +386,7 @@ async def test_evidence_bundle_contains_kisa_report_and_artifact_index(monkeypat
     assert "reports/policy_events.json" in names
     assert "evidence/artifact_index.json" in names
     assert "evidence/screenshots/shot.png" in names
+    assert "evidence/screenshots/outside-shot.png" not in names
     assert "kisa_report.html" in names
     assert "kisa_summary.md" in names
     assert "artifact_index.json" in names
@@ -373,6 +394,7 @@ async def test_evidence_bundle_contains_kisa_report_and_artifact_index(monkeypat
     assert "scan_policy.json" in names
     assert "policy_events.json" in names
     assert "screenshots/shot.png" in names
+    assert "screenshots/outside-shot.png" not in names
     with zipfile.ZipFile(bundle_path) as zf:
         metadata = json.loads(zf.read("reports/report_metadata.json").decode("utf-8"))
         scan_policy = json.loads(zf.read("reports/scan_policy.json").decode("utf-8"))

@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import DB, CurrentUser
 from app.core.config import get_settings
@@ -119,7 +120,6 @@ async def export_evidence_bundle(scan_id: uuid.UUID, current_user: CurrentUser, 
     if scan.status != ScanStatus.COMPLETED:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Scan not yet completed")
 
-    output_dir = settings.scan_data_path / str(scan.id) / "reports"
     metadata_result = await db.execute(
         select(Report)
         .where(Report.scan_id == scan.id)
@@ -127,6 +127,17 @@ async def export_evidence_bundle(scan_id: uuid.UUID, current_user: CurrentUser, 
     )
     metadata_report = next((report for report in metadata_result.scalars().all() if report.report_metadata), None)
     report_metadata = metadata_report.report_metadata if metadata_report else {}
+    bundle_path = await run_in_threadpool(_create_evidence_bundle, scan, report_metadata)
+
+    return FileResponse(
+        path=str(bundle_path),
+        media_type="application/zip",
+        filename=bundle_path.name,
+    )
+
+
+def _create_evidence_bundle(scan: Scan, report_metadata: dict) -> Path:
+    output_dir = settings.scan_data_path / str(scan.id) / "reports"
     engine = ReportEngine(scan=scan, findings=list(scan.findings), output_dir=output_dir, report_metadata=report_metadata)
     json_report = engine.generate(ReportFormat.JSON, ReportType.FULL)
     markdown_report = engine.generate(ReportFormat.MARKDOWN, ReportType.FULL)
@@ -164,10 +175,16 @@ async def export_evidence_bundle(scan_id: uuid.UUID, current_user: CurrentUser, 
         (policy_events_path, "policy_events.json"),
     ]
     checksums = {arcname: _sha256_file(path) for path, arcname in files}
+    screenshot_root = (settings.scan_data_path / str(scan.id) / "screenshots").resolve()
     screenshot_entries: list[tuple[Path, str]] = []
     for artifact in scan.evidence_artifacts:
-        screenshot_path = Path(artifact.screenshot_path) if artifact.screenshot_path else None
-        if screenshot_path and screenshot_path.exists() and screenshot_path.is_file():
+        screenshot_path = Path(artifact.screenshot_path).resolve() if artifact.screenshot_path else None
+        if (
+            screenshot_path
+            and screenshot_path.is_relative_to(screenshot_root)
+            and screenshot_path.exists()
+            and screenshot_path.is_file()
+        ):
             arcname = f"evidence/screenshots/{screenshot_path.name}"
             screenshot_entries.append((screenshot_path, arcname))
             checksums[arcname] = _sha256_file(screenshot_path)
@@ -204,11 +221,7 @@ async def export_evidence_bundle(scan_id: uuid.UUID, current_user: CurrentUser, 
         for arcname, content in preview_entries:
             zf.writestr(arcname, content)
 
-    return FileResponse(
-        path=str(bundle_path),
-        media_type="application/zip",
-        filename=f"sss_evidence_bundle_{short_id}.zip",
-    )
+    return bundle_path
 
 
 @router.get("/{report_id}/download")

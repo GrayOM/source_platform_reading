@@ -40,11 +40,11 @@ build:
 	docker compose build
 
 guardrails:
-	./scripts/check_secret_like.sh
-	./scripts/check_line_endings.sh
+	bash ./scripts/check_secret_like.sh
+	bash ./scripts/check_line_endings.sh
 
 verify-release:
-	./scripts/verify_release.sh
+	bash ./scripts/verify_release.sh
 
 up:
 	docker compose up -d

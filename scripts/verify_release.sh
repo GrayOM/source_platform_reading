@@ -14,8 +14,8 @@ section() {
 section "Working tree and secret-like grep"
 git status --short
 git diff --check
-./scripts/check_secret_like.sh
-./scripts/check_line_endings.sh
+bash ./scripts/check_secret_like.sh
+bash ./scripts/check_line_endings.sh
 
 section "Docker Compose config"
 docker compose config >/dev/null
