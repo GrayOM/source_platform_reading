@@ -1,4 +1,6 @@
 import uuid
+import asyncio
+import json
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -8,6 +10,46 @@ from app.models.project import Project
 from app.models.scan import Scan, ScanStatus
 from app.services.crawler.crawler import PlaywrightCrawler
 from app.services.scan_policy import ScanPolicyResolver
+
+
+class _FakeResponse:
+    status = 200
+    headers = {"content-type": "text/html"}
+
+    def __init__(self, url: str):
+        self.url = url
+
+
+class _FakePage:
+    def __init__(self, links_by_url: dict[str, list[str]]):
+        self.links_by_url = links_by_url
+        self.url = ""
+
+    def on(self, *_args, **_kwargs):
+        return None
+
+    async def route(self, *_args, **_kwargs):
+        return None
+
+    async def goto(self, url: str, **_kwargs):
+        self.url = url
+        return _FakeResponse(url)
+
+    async def evaluate(self, script: str):
+        if "querySelectorAll('a[href]')" in script:
+            return self.links_by_url.get(self.url, [])
+        return []
+
+    async def close(self):
+        return None
+
+
+class _FakeContext:
+    def __init__(self, links_by_url: dict[str, list[str]]):
+        self.links_by_url = links_by_url
+
+    async def new_page(self):
+        return _FakePage(self.links_by_url)
 
 
 def test_scan_policy_resolver_defaults_and_caps():
@@ -73,6 +115,51 @@ async def test_crawler_records_max_pages_event_without_failing(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_crawler_max_concurrency_one_crawls_child_pages_without_deadlock(tmp_path):
+    policy = ScanPolicyResolver.resolve(
+        "https://example.com",
+        {
+            "max_pages": 2,
+            "max_depth": 2,
+            "max_concurrency": 1,
+            "capture_screenshots": False,
+            "capture_storage": False,
+            "capture_api_flows": False,
+        },
+    )
+    crawler = PlaywrightCrawler("scan-id", "https://example.com", None, {"scan_policy": policy}, tmp_path)
+    crawler.semaphore = asyncio.Semaphore(1)
+    links = {
+        "https://example.com": ["https://example.com/child-1", "https://example.com/child-2"],
+        "https://example.com/child-1": [],
+        "https://example.com/child-2": [],
+    }
+
+    await asyncio.wait_for(crawler._crawl_page(_FakeContext(links), "https://example.com", depth=0, parent=None), timeout=2)
+
+    assert "https://example.com" in crawler.visited_pages
+    assert "https://example.com/child-1" in crawler.visited_pages
+    assert any(event["event_type"] == "max_pages_reached" for event in crawler.policy_events)
+
+
+@pytest.mark.asyncio
+async def test_resource_download_timeout_records_policy_event(tmp_path):
+    policy = ScanPolicyResolver.resolve("https://example.com", {"request_timeout_ms": 1000})
+    crawler = PlaywrightCrawler("scan-id", "https://example.com", None, {"scan_policy": policy}, tmp_path)
+    crawler.request_timeout_ms = 10
+
+    async def slow_download(_url: str, _discovered_on: str) -> None:
+        await asyncio.sleep(0.05)
+
+    crawler._download_resource_inner = slow_download
+
+    await crawler._download_resource("https://example.com/slow.js", "https://example.com")
+
+    assert any(event["event_type"] == "request_timeout" for event in crawler.policy_events)
+    assert any(item.get("policy_event") == "request_timeout" for item in crawler.failed_urls)
+
+
+@pytest.mark.asyncio
 async def test_scan_create_without_policy_stores_resolved_default(monkeypatch):
     from app.api.v1 import scans as scans_api
     from tests.test_api_smoke import _auth_headers
@@ -110,6 +197,12 @@ def test_report_outputs_include_scan_policy(tmp_path):
 
     project = _project()
     policy = ScanPolicyResolver.resolve("https://example.com", {"intensity": "low", "excluded_paths": ["/logout"]})
+    outside_event = ScanPolicyResolver.policy_event(
+        "outside_scope_blocked",
+        "https://outside.example.invalid/blocked",
+        "Discovered link is outside scan policy scope.",
+        "allowed_hosts",
+    )
     scan = Scan(
         id=uuid.uuid4(),
         project_id=project.id,
@@ -118,7 +211,10 @@ def test_report_outputs_include_scan_policy(tmp_path):
         progress=100,
         config={
             "scan_policy": policy,
-            "policy_events": [ScanPolicyResolver.policy_event("excluded_path_skipped", "https://example.com/logout", "Excluded path.", "excluded_paths")],
+            "policy_events": [
+                ScanPolicyResolver.policy_event("excluded_path_skipped", "https://example.com/logout", "Excluded path.", "excluded_paths"),
+                outside_event,
+            ],
         },
     )
     scan.project = project
@@ -130,8 +226,15 @@ def test_report_outputs_include_scan_policy(tmp_path):
     markdown = engine.generate(ReportFormat.MARKDOWN, ReportType.FULL).read_text(encoding="utf-8")
     kisa_html = engine.generate(ReportFormat.HTML, ReportType.KISA).read_text(encoding="utf-8")
 
-    assert '"scan_policy"' in payload
-    assert '"policy_events"' in payload
+    data = json.loads(payload)
+    assert data["scan_policy"]["intensity"] == "low"
+    assert data["scan_policy"]["max_pages"] == 30
+    assert data["scan_policy"]["same_origin_only"] is True
+    assert data["scan_policy"]["excluded_paths"] == ["/logout"]
+    assert len(data["policy_events"]) == 2
+    assert any(event["event_type"] == "outside_scope_blocked" for event in data["policy_events"])
     assert "Scan Policy Summary" in markdown
+    assert "outside_scope_blocked" in markdown
     assert "Scan Policy 및 안전 제한" in kisa_html
     assert "excluded_path_skipped" in kisa_html
+    assert "outside_scope_blocked" in kisa_html

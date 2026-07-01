@@ -316,7 +316,13 @@ async def test_evidence_bundle_contains_kisa_report_and_artifact_index(monkeypat
             config={
                 "scan_policy": ScanPolicyResolver.resolve("https://example.com", {"intensity": "low", "excluded_paths": ["/logout"]}),
                 "policy_events": [
-                    ScanPolicyResolver.policy_event("excluded_path_skipped", "https://example.com/logout", "URL path matches excluded path /logout.", "excluded_paths")
+                    ScanPolicyResolver.policy_event("excluded_path_skipped", "https://example.com/logout", "URL path matches excluded path /logout.", "excluded_paths"),
+                    ScanPolicyResolver.policy_event(
+                        "outside_scope_blocked",
+                        "https://outside.example.invalid/blocked",
+                        "Discovered link is outside scan policy scope.",
+                        "allowed_hosts",
+                    ),
                 ],
             },
         )
@@ -375,9 +381,13 @@ async def test_evidence_bundle_contains_kisa_report_and_artifact_index(monkeypat
         readme = zf.read("README.txt").decode("utf-8")
     assert metadata["client_name"] == "Bundle Client"
     assert scan_policy["intensity"] == "low"
+    assert scan_policy["max_pages"] == 30
+    assert scan_policy["same_origin_only"] is True
+    assert scan_policy["excluded_paths"] == ["/logout"]
     assert policy_events[0]["event_type"] == "excluded_path_skipped"
+    assert any(event["event_type"] == "outside_scope_blocked" for event in policy_events)
     assert manifest["redaction_applied"] is True
-    assert manifest["policy_event_count"] == 1
+    assert manifest["policy_event_count"] == 2
     assert manifest["formats_included"] == ["html", "markdown", "json"]
     assert manifest["artifact_count"] >= 1
     with zipfile.ZipFile(bundle_path) as zf:
@@ -387,6 +397,7 @@ async def test_evidence_bundle_contains_kisa_report_and_artifact_index(monkeypat
     assert manifest["checksums"]["reports/scan_policy.json"] == hashlib.sha256(policy_bytes).hexdigest()
     assert "Redaction notice" in readme
     assert "Scan policy:" in readme
+    assert "- Policy events: 2" in readme
     assert "evidence/artifact_index.json" in readme
 
 

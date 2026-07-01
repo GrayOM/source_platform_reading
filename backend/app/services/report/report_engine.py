@@ -552,6 +552,8 @@ class ReportEngine:
             f"",
             f"Policy limitations: automated collection is constrained by the saved scan policy. Blocked or skipped URLs are recorded as policy events and are not treated as scan failures.",
             f"",
+            *self._markdown_policy_event_lines(ctx["policy_events"]),
+            f"",
             f"## Executive Summary",
             f"",
             ctx["executive_summary"],
@@ -817,6 +819,8 @@ class ReportEngine:
             f"- Excluded paths: {', '.join(ctx['scan_policy'].get('excluded_paths') or []) or 'N/A'}",
             "자동 수집은 위 정책 범위와 제한 내에서 수행되며, 차단 또는 제외된 URL은 policy event로 기록됩니다.",
             "",
+            *self._markdown_policy_event_lines(ctx["policy_events"]),
+            "",
             "## 4. 인증 전/후 공격 표면 비교",
             "",
         ]
@@ -915,6 +919,17 @@ class ReportEngine:
         path = self.output_dir / self.output_filename(ctx["scan_id"], ReportType.KISA, ReportFormat.MARKDOWN)
         path.write_text("\n".join(lines), encoding="utf-8")
         return path
+
+    @staticmethod
+    def _markdown_policy_event_lines(policy_events: list[dict]) -> list[str]:
+        if not policy_events:
+            return ["### Policy Events", "", "No policy events recorded."]
+        lines = ["### Policy Events", "", "| Type | Severity | URL | Reason |", "|---|---|---|---|"]
+        for event in policy_events[:20]:
+            lines.append(
+                f"| {event.get('event_type') or 'unknown'} | {event.get('severity') or 'info'} | {event.get('url') or 'N/A'} | {event.get('reason') or 'N/A'} |"
+            )
+        return lines
 
     @staticmethod
     def _markdown_artifact_lines(artifacts: list[dict]) -> list[str]:

@@ -133,6 +133,7 @@ services:
       - "8081:80"
     volumes:
       - ./e2e/vulnerable-site:/usr/share/nginx/html:ro
+      - ./e2e/vulnerable-site/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
 volumes:

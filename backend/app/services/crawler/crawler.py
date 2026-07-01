@@ -215,6 +215,7 @@ class PlaywrightCrawler:
 
         self.visited_pages.add(url)
         self.sitemap_builder.add_page(url, parent)
+        child_pages: list[str] = []
 
         async with self.semaphore:
             try:
@@ -233,7 +234,22 @@ class PlaywrightCrawler:
                             await route.abort()
                             return
                         if not self._is_in_scope(req_url):
-                            self._record_policy_event("outside_scope_blocked", req_url, "Browser request is outside scan policy scope.", "allowed_hosts", "warning")
+                            if resource_type == "document":
+                                self._record_policy_event(
+                                    "redirect_outside_scope_blocked",
+                                    req_url,
+                                    "Navigation redirected outside scan policy scope.",
+                                    "allow_redirect_outside_scope",
+                                    "warning",
+                                )
+                            else:
+                                self._record_policy_event(
+                                    "outside_scope_blocked",
+                                    req_url,
+                                    "Browser request is outside scan policy scope.",
+                                    "allowed_hosts",
+                                    "warning",
+                                )
                             await route.abort()
                             return
                         if not self._is_url_allowed_by_private_policy(req_url):
@@ -359,7 +375,6 @@ class PlaywrightCrawler:
                 ])
 
                 # Queue discovered page links
-                child_pages = []
                 for link in (links or []):
                     norm = self._normalize_url(link, url)
                     if norm and self._is_in_scope(norm) and norm not in self.visited_pages:
@@ -375,12 +390,20 @@ class PlaywrightCrawler:
                         len(self.discovered_resources),
                     )
 
-                for child_url in child_pages:
-                    await self._crawl_page(context, child_url, depth + 1, url)
-
             except Exception as exc:
                 log.warning("crawl.page_failed", url=url, error=str(exc))
                 self.failed_urls.append({"url": url, "error": str(exc)})
+                error_text = str(exc).lower()
+                if "err_name_not_resolved" in error_text and self._is_in_scope(url) and not self.allow_redirect_outside_scope:
+                    self._record_policy_event(
+                        "redirect_outside_scope_blocked",
+                        url,
+                        "Navigation failed after a likely redirect to an unresolved outside-scope host.",
+                        "allow_redirect_outside_scope",
+                        "warning",
+                    )
+                if "timeout" in error_text:
+                    self._record_policy_event("request_timeout", url, str(exc), "request_timeout_ms", "warning")
                 self.discovered_resources[url] = DiscoveredResource(
                     url=url,
                     resource_type=ResourceType.OTHER,
@@ -388,7 +411,26 @@ class PlaywrightCrawler:
                     metadata=self._resource_metadata(failed=True, error=str(exc)),
                 )
 
+        for child_url in child_pages:
+            await self._crawl_page(context, child_url, depth + 1, url)
+
     async def _download_resource(self, url: str, discovered_on: str) -> None:
+        try:
+            await asyncio.wait_for(
+                self._download_resource_inner(url, discovered_on),
+                timeout=max(0.001, self.request_timeout_ms / 1000),
+            )
+        except asyncio.TimeoutError:
+            log.warning("crawl.download_timeout", url=url)
+            self._record_policy_event(
+                "request_timeout",
+                url,
+                "Resource download exceeded request_timeout_ms.",
+                "request_timeout_ms",
+                "warning",
+            )
+
+    async def _download_resource_inner(self, url: str, discovered_on: str) -> None:
         if url in self.discovered_resources and self.discovered_resources[url].file_path:
             return  # already downloaded
         if not self._can_download_resource(url):
