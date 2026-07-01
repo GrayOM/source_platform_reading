@@ -1,4 +1,4 @@
-.PHONY: help setup dev test lint build verify-release clean
+.PHONY: help setup dev test lint build guardrails verify-release clean
 
 help:
 	@echo "SSS Platform"
@@ -7,6 +7,7 @@ help:
 	@echo "  make test        Run backend tests"
 	@echo "  make lint        Run linters"
 	@echo "  make build       Build Docker images"
+	@echo "  make guardrails  Run repository safety checks"
 	@echo "  make verify-release Run release verification checks"
 	@echo "  make up          Start full stack via docker-compose"
 	@echo "  make down        Stop docker-compose"
@@ -37,6 +38,10 @@ lint:
 
 build:
 	docker compose build
+
+guardrails:
+	./scripts/check_secret_like.sh
+	./scripts/check_line_endings.sh
 
 verify-release:
 	./scripts/verify_release.sh

@@ -10,6 +10,12 @@ Full scripted verification:
 make verify-release
 ```
 
+Repository-only guardrails:
+
+```bash
+make guardrails
+```
+
 Manual verification:
 
 ```bash

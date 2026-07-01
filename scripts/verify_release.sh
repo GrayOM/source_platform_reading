@@ -14,11 +14,8 @@ section() {
 section "Working tree and secret-like grep"
 git status --short
 git diff --check
-secret_pattern='sk_(test|live)|pk_(test|live)|rk_(test|live)|gh''p_|github''_pat_|A''KIA|A''SIA|xox''b-|xox''p-|Bearer e''yJ'
-if git grep -n -E "$secret_pattern"; then
-  echo "Secret-like pattern found; review output above." >&2
-  exit 1
-fi
+./scripts/check_secret_like.sh
+./scripts/check_line_endings.sh
 
 section "Docker Compose config"
 docker compose config >/dev/null

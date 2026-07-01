@@ -14,14 +14,14 @@ Use this checklist before publishing a v1.x SSS release. The goal is a fresh clo
 ```bash
 git status --short
 git diff --check
-git grep -n -E "sk_(test|live)|pk_(test|live)|rk_(test|live)|gh""p_|github""_pat_|A""KIA|A""SIA|xox""b-|xox""p-|Bearer e""yJ"
+make guardrails
 ```
 
 Success criteria:
 
 - `git status --short` contains only intentional release changes.
 - `git diff --check` reports no whitespace errors.
-- Secret-like grep prints no findings.
+- Guardrail scripts report no secret-like literals or CRLF line endings.
 
 ## Docker Build
 

@@ -15,9 +15,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  guardrails:
+    name: Repository Guardrails
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check secret-like literals
+        run: ./scripts/check_secret_like.sh
+
+      - name: Check line endings
+        run: ./scripts/check_line_endings.sh
+
   backend:
     name: Backend
     runs-on: ubuntu-latest
+    needs:
+      - guardrails
     services:
       postgres:
         image: postgres:15-alpine
