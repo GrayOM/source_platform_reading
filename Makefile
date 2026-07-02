@@ -22,7 +22,7 @@ setup:
 
 dev:
 	docker compose up postgres redis -d
-	cd backend && DATABASE_URL=postgresql+asyncpg://sss:change_me_strong_password@localhost:5432/sss_platform \
+	set -a; . ./.env; set +a; cd backend && DATABASE_URL=postgresql+asyncpg://sss:change_me_strong_password@localhost:5432/sss_platform \
 	              REDIS_URL=redis://localhost:6379/0 \
 	              SECRET_KEY=dev_secret_key_change_me \
 	              FERNET_KEY=YourFernetKeyHere12345678901234= \

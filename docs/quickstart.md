@@ -17,6 +17,18 @@ cp .env.example .env
 
 로컬 데모 기본값은 Docker Compose에 맞춰져 있습니다. 외부 대상이나 운영 배포에서는 `SECRET_KEY`, `FERNET_KEY`, DB password, `SSRF_ALLOWED_HOSTS`, `ALLOW_PRIVATE_TARGETS`를 환경에 맞게 변경하세요.
 
+Optional AI round2 analysis can use NVIDIA NIM. Set these values in `.env` when needed:
+
+```bash
+AI_PROVIDER=auto
+NVIDIA_API_KEY=<your_nvidia_api_key>
+NVIDIA_NIM_MODEL=deepseek-ai/deepseek-v4-pro
+NVIDIA_THINKING=false
+```
+
+`AI_PROVIDER=auto` prefers NVIDIA NIM when `NVIDIA_API_KEY` is present and falls back to Anthropic when only `ANTHROPIC_API_KEY` is configured.
+Additional NVIDIA adapter settings are available for PII detection, embeddings, code embeddings, and reranking. Leave adapter-specific API keys empty to reuse `NVIDIA_API_KEY`.
+
 ## 3. Compose Validation and Build
 
 ```bash

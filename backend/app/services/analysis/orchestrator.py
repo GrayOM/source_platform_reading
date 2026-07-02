@@ -23,6 +23,7 @@ from app.services.analysis.agents.auth_analyzer import AuthAnalyzerAgent
 from app.services.analysis.agents.base_agent import AI_SKIP_MESSAGE, AIAnalysisSkipped, AgentContext, is_ai_analysis_configured
 from app.services.analysis.agents.business_logic_analyzer import BusinessLogicAgent
 from app.services.analysis.agents.js_analyzer import JSAnalyzerAgent
+from app.services.analysis.agents.pii_detector import PIIDetectorAgent
 from app.services.analysis.agents.secret_detector import SecretDetectorAgent
 from app.services.evidence.artifacts import link_artifacts_for_finding
 from app.services.finding_fingerprint import generate_finding_fingerprint
@@ -42,6 +43,7 @@ class AnalysisOrchestrator:
             JSAnalyzerAgent(),
             SecretDetectorAgent(),
             APIMapperAgent(),
+            PIIDetectorAgent(),
         ]
         self._agents_round2 = [
             AuthAnalyzerAgent(),
@@ -131,12 +133,16 @@ class AnalysisOrchestrator:
             severity=Severity.INFO,
             title=AI_SKIP_MESSAGE,
             description=(
-                "Optional AI round2 analysis was skipped because ANTHROPIC_API_KEY is empty "
-                "or still set to a placeholder value. Deterministic round1 analysis completed normally."
+                "Optional AI round2 analysis was skipped because no supported AI provider API key "
+                "is configured or the configured key still looks like a placeholder. "
+                "Deterministic round1 analysis completed normally."
             ),
             affected_url=self.target_url,
-            evidence={"reason": "ANTHROPIC_API_KEY is not configured"},
-            recommendation="Set a valid ANTHROPIC_API_KEY only when optional AI round2 analysis is needed.",
+            evidence={"reason": "No valid AI provider API key is configured"},
+            recommendation=(
+                "Set NVIDIA_API_KEY for NVIDIA NIM or ANTHROPIC_API_KEY for Anthropic only when "
+                "optional AI round2 analysis is needed."
+            ),
         )
 
     async def _persist_findings(self, findings: list[FindingCreate]) -> list[Finding]:

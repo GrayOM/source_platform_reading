@@ -46,8 +46,22 @@ class Settings(BaseSettings):
     e2e_browser_auth_password: str = "password123!"
 
     # AI
+    ai_provider: str = "auto"
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
+    nvidia_api_key: str = ""
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    nvidia_nim_model: str = "deepseek-ai/deepseek-v4-pro"
+    nvidia_thinking: bool = False
+    nvidia_pii_api_key: str = ""
+    nvidia_pii_model: str = "nvidia/gliner-pii"
+    nvidia_embed_api_key: str = ""
+    nvidia_embed_model: str = "nvidia/nv-embed-v1"
+    nvidia_code_embed_api_key: str = ""
+    nvidia_code_embed_model: str = "nvidia/nv-embedcode-7b-v1"
+    nvidia_rerank_api_key: str = ""
+    nvidia_rerank_url: str = "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking"
+    nvidia_rerank_model: str = "nv-rerank-qa-mistral-4b:1"
     ai_model: str = "claude-sonnet-4-6"
     ai_max_tokens: int = 8192
 
@@ -69,6 +83,16 @@ class Settings(BaseSettings):
     @property
     def max_resource_size_bytes(self) -> int:
         return self.max_resource_size_mb * 1024 * 1024
+
+    def nvidia_key_for(self, purpose: str) -> str:
+        specific_keys = {
+            "chat": self.nvidia_api_key,
+            "pii": self.nvidia_pii_api_key,
+            "embed": self.nvidia_embed_api_key,
+            "code_embed": self.nvidia_code_embed_api_key,
+            "rerank": self.nvidia_rerank_api_key,
+        }
+        return (specific_keys.get(purpose, "") or self.nvidia_api_key).strip()
 
 
 @lru_cache

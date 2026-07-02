@@ -10,6 +10,7 @@ import structlog
 from app.core.config import get_settings
 from app.models.finding import FindingStatus, Severity, VulnType
 from app.schemas.finding import FindingCreate
+from app.services.ai.nvidia import NvidiaNIMClient
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -22,7 +23,24 @@ class AIAnalysisSkipped(RuntimeError):
 
 
 def is_ai_analysis_configured() -> bool:
-    key = (settings.anthropic_api_key or "").strip()
+    return get_configured_ai_provider() is not None
+
+
+def get_configured_ai_provider() -> str | None:
+    provider = (settings.ai_provider or "auto").strip().lower()
+    if provider not in {"auto", "anthropic", "nvidia"}:
+        log.warning("ai.provider_unsupported", provider=provider)
+        return None
+
+    if provider in {"auto", "nvidia"} and _is_valid_nvidia_key(settings.nvidia_key_for("chat")):
+        return "nvidia"
+    if provider in {"auto", "anthropic"} and _is_valid_anthropic_key(settings.anthropic_api_key):
+        return "anthropic"
+    return None
+
+
+def _is_valid_anthropic_key(key: str | None) -> bool:
+    key = (key or "").strip()
     if not key:
         return False
 
@@ -39,6 +57,24 @@ def is_ai_analysis_configured() -> bool:
         return False
 
     return key.startswith("sk-ant-api") and len(key) > 40
+
+
+def _is_valid_nvidia_key(key: str | None) -> bool:
+    key = (key or "").strip()
+    if not key:
+        return False
+    lowered = key.lower()
+    placeholders = {
+        "nvapi-...",
+        "nvapi-test",
+        "placeholder",
+        "your_api_key",
+        "change_me",
+        "changeme",
+    }
+    if lowered in placeholders or "..." in lowered:
+        return False
+    return len(key) > 20
 
 
 @dataclass
@@ -64,9 +100,17 @@ class BaseAgent(ABC):
         """Run analysis and return findings."""
 
     def _call_claude(self, system: str, user: str, max_tokens: int = 4096) -> str:
-        if not is_ai_analysis_configured():
-            raise AIAnalysisSkipped(AI_SKIP_MESSAGE)
+        return self._call_ai(system, user, max_tokens=max_tokens)
 
+    def _call_ai(self, system: str, user: str, max_tokens: int = 4096) -> str:
+        provider = get_configured_ai_provider()
+        if provider is None:
+            raise AIAnalysisSkipped(AI_SKIP_MESSAGE)
+        if provider == "nvidia":
+            return self._call_nvidia_nim(system, user, max_tokens=max_tokens)
+        return self._call_anthropic(system, user, max_tokens=max_tokens)
+
+    def _call_anthropic(self, system: str, user: str, max_tokens: int = 4096) -> str:
         if self._client is None:
             self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
@@ -77,6 +121,21 @@ class BaseAgent(ABC):
             messages=[{"role": "user", "content": user}],
         )
         return response.content[0].text
+
+    def _call_nvidia_nim(self, system: str, user: str, max_tokens: int = 4096) -> str:
+        model = (settings.nvidia_nim_model or "").strip()
+        if not model:
+            raise AIAnalysisSkipped(AI_SKIP_MESSAGE)
+        return NvidiaNIMClient(settings).chat_completion(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=min(max_tokens, settings.ai_max_tokens),
+            temperature=0.1,
+            extra_body={"chat_template_kwargs": {"thinking": settings.nvidia_thinking}},
+        )
 
     def _parse_findings_json(self, raw: str, agent_name: str) -> list[FindingCreate]:
         """Extract and parse JSON findings array from model output."""

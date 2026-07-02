@@ -42,6 +42,22 @@ services:
       ALLOW_PRIVATE_TARGETS: ${ALLOW_PRIVATE_TARGETS:-false}
       SSRF_ALLOWED_HOSTS: ${SSRF_ALLOWED_HOSTS:-vulnerable-site,host.docker.internal}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost,http://localhost:3000}
+      AI_PROVIDER: ${AI_PROVIDER:-auto}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      NVIDIA_NIM_MODEL: ${NVIDIA_NIM_MODEL:-deepseek-ai/deepseek-v4-pro}
+      NVIDIA_THINKING: ${NVIDIA_THINKING:-false}
+      NVIDIA_PII_MODEL: ${NVIDIA_PII_MODEL:-nvidia/gliner-pii}
+      NVIDIA_PII_API_KEY: ${NVIDIA_PII_API_KEY:-}
+      NVIDIA_EMBED_MODEL: ${NVIDIA_EMBED_MODEL:-nvidia/nv-embed-v1}
+      NVIDIA_EMBED_API_KEY: ${NVIDIA_EMBED_API_KEY:-}
+      NVIDIA_CODE_EMBED_MODEL: ${NVIDIA_CODE_EMBED_MODEL:-nvidia/nv-embedcode-7b-v1}
+      NVIDIA_CODE_EMBED_API_KEY: ${NVIDIA_CODE_EMBED_API_KEY:-}
+      NVIDIA_RERANK_URL: ${NVIDIA_RERANK_URL:-https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking}
+      NVIDIA_RERANK_MODEL: ${NVIDIA_RERANK_MODEL:-nv-rerank-qa-mistral-4b:1}
+      NVIDIA_RERANK_API_KEY: ${NVIDIA_RERANK_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-claude-sonnet-4-6}
     volumes:
       - scan_data:/data/scans
     ports:
@@ -68,6 +84,22 @@ services:
       ALLOW_PRIVATE_TARGETS: ${ALLOW_PRIVATE_TARGETS:-false}
       RUN_MIGRATIONS: "false"
       SSRF_ALLOWED_HOSTS: ${SSRF_ALLOWED_HOSTS:-vulnerable-site,host.docker.internal}
+      AI_PROVIDER: ${AI_PROVIDER:-auto}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      NVIDIA_NIM_MODEL: ${NVIDIA_NIM_MODEL:-deepseek-ai/deepseek-v4-pro}
+      NVIDIA_THINKING: ${NVIDIA_THINKING:-false}
+      NVIDIA_PII_MODEL: ${NVIDIA_PII_MODEL:-nvidia/gliner-pii}
+      NVIDIA_PII_API_KEY: ${NVIDIA_PII_API_KEY:-}
+      NVIDIA_EMBED_MODEL: ${NVIDIA_EMBED_MODEL:-nvidia/nv-embed-v1}
+      NVIDIA_EMBED_API_KEY: ${NVIDIA_EMBED_API_KEY:-}
+      NVIDIA_CODE_EMBED_MODEL: ${NVIDIA_CODE_EMBED_MODEL:-nvidia/nv-embedcode-7b-v1}
+      NVIDIA_CODE_EMBED_API_KEY: ${NVIDIA_CODE_EMBED_API_KEY:-}
+      NVIDIA_RERANK_URL: ${NVIDIA_RERANK_URL:-https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking}
+      NVIDIA_RERANK_MODEL: ${NVIDIA_RERANK_MODEL:-nv-rerank-qa-mistral-4b:1}
+      NVIDIA_RERANK_API_KEY: ${NVIDIA_RERANK_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-claude-sonnet-4-6}
     volumes:
       - scan_data:/data/scans
     depends_on:
@@ -93,6 +125,22 @@ services:
       ALLOW_PRIVATE_TARGETS: ${ALLOW_PRIVATE_TARGETS:-false}
       RUN_MIGRATIONS: "false"
       SSRF_ALLOWED_HOSTS: ${SSRF_ALLOWED_HOSTS:-vulnerable-site,host.docker.internal}
+      AI_PROVIDER: ${AI_PROVIDER:-auto}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      NVIDIA_NIM_MODEL: ${NVIDIA_NIM_MODEL:-deepseek-ai/deepseek-v4-pro}
+      NVIDIA_THINKING: ${NVIDIA_THINKING:-false}
+      NVIDIA_PII_MODEL: ${NVIDIA_PII_MODEL:-nvidia/gliner-pii}
+      NVIDIA_PII_API_KEY: ${NVIDIA_PII_API_KEY:-}
+      NVIDIA_EMBED_MODEL: ${NVIDIA_EMBED_MODEL:-nvidia/nv-embed-v1}
+      NVIDIA_EMBED_API_KEY: ${NVIDIA_EMBED_API_KEY:-}
+      NVIDIA_CODE_EMBED_MODEL: ${NVIDIA_CODE_EMBED_MODEL:-nvidia/nv-embedcode-7b-v1}
+      NVIDIA_CODE_EMBED_API_KEY: ${NVIDIA_CODE_EMBED_API_KEY:-}
+      NVIDIA_RERANK_URL: ${NVIDIA_RERANK_URL:-https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking}
+      NVIDIA_RERANK_MODEL: ${NVIDIA_RERANK_MODEL:-nv-rerank-qa-mistral-4b:1}
+      NVIDIA_RERANK_API_KEY: ${NVIDIA_RERANK_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-claude-sonnet-4-6}
       BROWSER_AUTH_MODE: ${BROWSER_AUTH_MODE:-manual}
       E2E_BROWSER_AUTH_ENABLED: ${E2E_BROWSER_AUTH_ENABLED:-true}
       E2E_BROWSER_AUTH_ALLOWED_HOSTS: ${E2E_BROWSER_AUTH_ALLOWED_HOSTS:-vulnerable-site,localhost,127.0.0.1}

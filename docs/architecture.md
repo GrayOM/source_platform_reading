@@ -80,7 +80,7 @@
 | **PlaywrightCrawler** | Authenticated recursive crawl, JS rendering, resource discovery | Playwright |
 | **DownloadManager** | Parallel resource download, deduplication, classification | httpx + aiofiles |
 | **AnalysisOrchestrator** | Agent lifecycle management, shared context, result aggregation | asyncio |
-| **AI Agents** | Specialized security analysis per domain | Anthropic Claude API |
+| **AI Agents** | Specialized security analysis per domain | NVIDIA NIM or Anthropic |
 | **ReportEngine** | Structured finding formatting, template rendering, PDF export | Jinja2 + WeasyPrint |
 | **PostgreSQL** | Persistent storage for all entities | asyncpg + SQLAlchemy |
 | **Redis** | Celery broker, WebSocket pub/sub, rate limiting | Redis 7 |
